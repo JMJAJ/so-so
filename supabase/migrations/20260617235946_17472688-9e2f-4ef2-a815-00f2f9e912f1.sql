@@ -1,0 +1,1 @@
+REVOKE EXECUTE ON FUNCTION public.seed_demo_trading_data() FROM PUBLIC, anon, authenticated;
