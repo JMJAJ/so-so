@@ -14,7 +14,117 @@ export type Database = {
   }
   public: {
     Tables: {
-      [_ in never]: never
+      ai_logs: {
+        Row: {
+          action: string
+          created_at: string
+          id: string
+          level: string
+          message: string
+          pair: string | null
+          user_id: string
+        }
+        Insert: {
+          action: string
+          created_at?: string
+          id?: string
+          level?: string
+          message: string
+          pair?: string | null
+          user_id: string
+        }
+        Update: {
+          action?: string
+          created_at?: string
+          id?: string
+          level?: string
+          message?: string
+          pair?: string | null
+          user_id?: string
+        }
+        Relationships: []
+      }
+      positions: {
+        Row: {
+          asset_class: string
+          confidence: number
+          current_price: number
+          entry_price: number
+          id: string
+          opened_at: string
+          pair: string
+          pnl: number
+          pnl_pct: number
+          side: string
+          size: number
+          user_id: string
+        }
+        Insert: {
+          asset_class?: string
+          confidence?: number
+          current_price: number
+          entry_price: number
+          id?: string
+          opened_at?: string
+          pair: string
+          pnl?: number
+          pnl_pct?: number
+          side: string
+          size: number
+          user_id: string
+        }
+        Update: {
+          asset_class?: string
+          confidence?: number
+          current_price?: number
+          entry_price?: number
+          id?: string
+          opened_at?: string
+          pair?: string
+          pnl?: number
+          pnl_pct?: number
+          side?: string
+          size?: number
+          user_id?: string
+        }
+        Relationships: []
+      }
+      trades: {
+        Row: {
+          closed_at: string
+          entry_price: number
+          exit_price: number
+          id: string
+          pair: string
+          pnl: number
+          side: string
+          size: number
+          user_id: string
+        }
+        Insert: {
+          closed_at?: string
+          entry_price: number
+          exit_price: number
+          id?: string
+          pair: string
+          pnl: number
+          side: string
+          size: number
+          user_id: string
+        }
+        Update: {
+          closed_at?: string
+          entry_price?: number
+          exit_price?: number
+          id?: string
+          pair?: string
+          pnl?: number
+          side?: string
+          size?: number
+          user_id?: string
+        }
+        Relationships: []
+      }
     }
     Views: {
       [_ in never]: never
