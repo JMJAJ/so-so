@@ -5,8 +5,8 @@ import { createChart, CandlestickSeries, LineSeries, HistogramSeries, AreaSeries
 import {
   sma as calcSma, ema as calcEma, bollingerBands as calcBB,
   rsi as calcRsi, macd as calcMacd, detectSupportResistance,
-  scoreSignals, projectCone,
-  type Candle, type SignalScore,
+  scoreSignals, projectCone, detectPatterns,
+  type Candle, type SignalScore, type ChartPattern,
 } from "@/lib/indicators";
 import {
   Activity, Wallet, TrendingUp, AlertTriangle, Power,
@@ -466,7 +466,7 @@ function DashboardView({ t, startingEquity, positions, trades, logs, filteredPos
                   </tr>
                 </thead>
                 <tbody>
-                  {[...trades].reverse().map((tr) => (
+                  {[...trades].reverse().slice(0, 5).map((tr) => (
                     <tr key={tr.id} className="border-b border-border/40">
                       <td className="py-2 font-bold">{tr.pair}</td>
                       <td>
@@ -495,6 +495,7 @@ function DashboardView({ t, startingEquity, positions, trades, logs, filteredPos
               </div>
             </div>
           </Panel>
+          <WhalePanel />
         </div>
       </section>
     </>
@@ -518,6 +519,8 @@ function TradeIdeasView({ initialSymbol, onClearSymbol }: { initialSymbol: strin
   const [textAnnotationInput, setTextAnnotationInput] = useState("");
   const [pendingTextPoint, setPendingTextPoint] = useState<{ price: number; time: any } | null>(null);
   const [signalScore, setSignalScore] = useState<SignalScore | null>(null);
+  const [detectedPatterns, setDetectedPatterns] = useState<ChartPattern[]>([]);
+  const [chartTradeModal, setChartTradeModal] = useState<{ side: "long" | "short"; sl: number | null; tp: number | null } | null>(null);
   const chartRef = React.useRef<HTMLDivElement>(null);
   const chartInstanceRef = React.useRef<any>(null);
   const seriesRef = React.useRef<any>(null);
@@ -564,9 +567,11 @@ function TradeIdeasView({ initialSymbol, onClearSymbol }: { initialSymbol: strin
   useEffect(() => {
     if (!chartRef.current || chartData.length === 0) return;
 
-    const candles: Candle[] = chartData.map((d: any) => ({
-      time: d.time, open: d.open, high: d.high, low: d.low, close: d.close, volume: d.volume ?? 0,
-    }));
+    const candles: Candle[] = chartData
+      .map((d: any) => ({
+        time: d.time, open: d.open, high: d.high, low: d.low, close: d.close, volume: d.volume ?? 0,
+      }))
+      .sort((a, b) => a.time - b.time);
     const closes = candles.map((c) => c.close);
     const times = candles.map((c) => c.time);
 
@@ -600,7 +605,7 @@ function TradeIdeasView({ initialSymbol, onClearSymbol }: { initialSymbol: strin
       borderDownColor: '#ef4444', borderUpColor: '#10b981',
       wickDownColor: '#ef4444', wickUpColor: '#10b981',
     });
-    series.setData(chartData);
+    series.setData(candles as any);
     seriesRef.current = series;
 
     // ── Moving averages ──
@@ -657,6 +662,94 @@ function TradeIdeasView({ initialSymbol, onClearSymbol }: { initialSymbol: strin
       });
       coneLower.setData(cone.lower as any);
     }
+
+    // ── Chart Patterns ──
+    const patterns = detectPatterns(candles);
+    setDetectedPatterns(patterns);
+    const priceMin = Math.min(...candles.map((c) => c.low));
+    const priceMax = Math.max(...candles.map((c) => c.high));
+    const priceRange = priceMax - priceMin;
+    patterns.forEach((p) => {
+      // Skip patterns with prices outside a reasonable range
+      const allPrices = [p.upper.startPrice, p.upper.endPrice, p.lower.startPrice, p.lower.endPrice];
+      if (allPrices.some((pr) => pr < priceMin - priceRange || pr > priceMax + priceRange)) return;
+
+      const color = p.breakout === 'up' ? '#10b981' : p.breakout === 'down' ? '#ef4444' : '#f59e0b';
+
+      // Solid trendlines between swing points
+      const upperTrend = chart.addSeries(LineSeries, {
+        color, lineWidth: 2, lineStyle: 0, crosshairMarkerVisible: false, priceLineVisible: false, lastValueVisible: false,
+      });
+      upperTrend.setData([
+        { time: p.upper.startTime, value: p.upper.startPrice },
+        { time: p.upper.endTime, value: p.upper.endPrice },
+      ] as any);
+      const lowerTrend = chart.addSeries(LineSeries, {
+        color, lineWidth: 2, lineStyle: 0, crosshairMarkerVisible: false, priceLineVisible: false, lastValueVisible: false,
+      });
+      lowerTrend.setData([
+        { time: p.lower.startTime, value: p.lower.startPrice },
+        { time: p.lower.endTime, value: p.lower.endPrice },
+      ] as any);
+
+      // Project trendlines forward 10 bars
+      const barInterval = times.length > 1 ? times[1] - times[0] : 900;
+      const fwdBars = 10;
+
+      const upperDuration = p.upper.endTime - p.upper.startTime;
+      const upperSlopePerBar = upperDuration > 0 ? (p.upper.endPrice - p.upper.startPrice) / (upperDuration / barInterval) : 0;
+      const fwdUpperTime = p.upper.endTime + fwdBars * barInterval;
+      const fwdUpperPrice = p.upper.endPrice + upperSlopePerBar * fwdBars;
+
+      const lowerDuration = p.lower.endTime - p.lower.startTime;
+      const lowerSlopePerBar = lowerDuration > 0 ? (p.lower.endPrice - p.lower.startPrice) / (lowerDuration / barInterval) : 0;
+      const fwdLowerTime = p.lower.endTime + fwdBars * barInterval;
+      const fwdLowerPrice = p.lower.endPrice + lowerSlopePerBar * fwdBars;
+
+      // Dashed forward extensions
+      const upperFwd = chart.addSeries(LineSeries, {
+        color: color === '#10b981' ? 'rgba(16,185,129,0.8)' : color === '#ef4444' ? 'rgba(239,68,68,0.8)' : 'rgba(245,158,11,0.8)',
+        lineWidth: 2, lineStyle: 2, crosshairMarkerVisible: false, priceLineVisible: false, lastValueVisible: false,
+      });
+      upperFwd.setData([
+        { time: p.upper.endTime, value: p.upper.endPrice },
+        { time: fwdUpperTime, value: fwdUpperPrice },
+      ] as any);
+      const lowerFwd = chart.addSeries(LineSeries, {
+        color: color === '#10b981' ? 'rgba(16,185,129,0.8)' : color === '#ef4444' ? 'rgba(239,68,68,0.8)' : 'rgba(245,158,11,0.8)',
+        lineWidth: 2, lineStyle: 2, crosshairMarkerVisible: false, priceLineVisible: false, lastValueVisible: false,
+      });
+      lowerFwd.setData([
+        { time: p.lower.endTime, value: p.lower.endPrice },
+        { time: fwdLowerTime, value: fwdLowerPrice },
+      ] as any);
+
+      // Midline projection showing expected breakout direction
+      const midStartTime = Math.max(p.upper.endTime, p.lower.endTime);
+      const midStartPrice = (p.upper.endPrice + p.lower.endPrice) / 2;
+      const midEndTime = Math.max(fwdUpperTime, fwdLowerTime);
+      const midEndPrice = (fwdUpperPrice + fwdLowerPrice) / 2;
+      const midFwd = chart.addSeries(LineSeries, {
+        color: p.breakout === 'up' ? 'rgba(16,185,129,0.9)' : p.breakout === 'down' ? 'rgba(239,68,68,0.9)' : 'rgba(245,158,11,0.9)',
+        lineWidth: 2, lineStyle: 2, crosshairMarkerVisible: false, priceLineVisible: false, lastValueVisible: false,
+      });
+      midFwd.setData([
+        { time: midStartTime, value: midStartPrice },
+        { time: midEndTime, value: midEndPrice },
+      ] as any);
+
+      // Projected breakout target line
+      if (p.breakout !== 'either' && p.target > priceMin - priceRange && p.target < priceMax + priceRange) {
+        series.createPriceLine({
+          price: p.target,
+          color,
+          lineWidth: 1,
+          lineStyle: 2,
+          axisLabelVisible: true,
+          title: `Target ${p.target.toFixed(2)}`,
+        });
+      }
+    });
 
     // ── Trade idea lines ──
     if (selectedIdea) {
@@ -863,7 +956,7 @@ function TradeIdeasView({ initialSymbol, onClearSymbol }: { initialSymbol: strin
 
       <div className="grid gap-4 lg:grid-cols-[300px_1fr]">
         {/* Left sidebar */}
-        <div className="space-y-4">
+        <div className="flex flex-col gap-4">
           {/* Search bar */}
           <div className="rounded-sm border border-border bg-card p-3">
             <input
@@ -918,10 +1011,10 @@ function TradeIdeasView({ initialSymbol, onClearSymbol }: { initialSymbol: strin
           </div>
 
           {closedIdeas.length > 0 && (
-            <div className="rounded-sm border border-border bg-card p-4">
-              <h3 className="mb-3 text-xs font-bold uppercase tracking-[0.2em] text-muted-foreground">Closed ({closedIdeas.length})</h3>
-              <div className="space-y-2 max-h-[300px] overflow-y-auto">
-                {closedIdeas.map((idea) => (
+            <div className="flex flex-1 flex-col rounded-sm border border-border bg-card p-4">
+              <h3 className="mb-3 text-xs font-bold uppercase tracking-[0.2em] text-muted-foreground">Closed ({Math.min(closedIdeas.length, 10)})</h3>
+              <div className="flex-1 space-y-2 overflow-y-auto">
+                {closedIdeas.slice(0, 10).map((idea) => (
                   <button key={idea.id} onClick={() => { setSelectedIdea(idea); setSelectedSymbol(null); }}
                     className={`w-full rounded-sm border p-2 text-left transition opacity-60 hover:opacity-100 ${selectedIdea?.id === idea.id ? 'border-primary bg-primary/10' : 'border-border hover:border-primary/50'}`}>
                     <div className="flex items-center justify-between">
@@ -987,30 +1080,84 @@ function TradeIdeasView({ initialSymbol, onClearSymbol }: { initialSymbol: strin
                   {drawMode === 'text' && 'Click chart to place text note'}
                 </span>
                 <div className="ml-auto flex gap-2">
-                  {/* Create Idea button - asks AI */}
+                  {/* Buy button with auto-filled SL/TP from patterns */}
+                  <button onClick={() => {
+                    if (!currentSymbol) return;
+                    const pattern = detectedPatterns[0];
+                    const latestIdea = ideas.find((i) => i.symbol === currentSymbol && i.status === 'active');
+                    const side = (pattern?.breakout === 'down' ? 'short' : pattern?.breakout === 'up' ? 'long' : latestIdea?.side ?? 'long') as "long" | "short";
+                    const sl = pattern && pattern.breakout !== 'either'
+                      ? (side === 'long' ? pattern.lower.endPrice : pattern.upper.endPrice)
+                      : latestIdea?.stop_loss ?? null;
+                    const tp = pattern && pattern.breakout !== 'either'
+                      ? pattern.target
+                      : latestIdea?.take_profit ?? null;
+                    setChartTradeModal({ side, sl, tp });
+                  }}
+                    className="rounded-sm border border-blue-500/60 bg-blue-500/15 px-3 py-1 text-[10px] font-bold uppercase tracking-widest text-blue-400 transition hover:border-blue-400 hover:bg-blue-500/25">
+                    Buy
+                  </button>
+                  {/* Scalp idea button */}
                   <button onClick={(e) => {
                     if (!currentSymbol) return;
                     const btn = e.currentTarget;
                     btn.disabled = true; btn.textContent = "AI thinking...";
-                    fetch(`${API}/trade-ideas/generate?symbol=${encodeURIComponent(currentSymbol)}`, {
+                    fetch(`${API}/trade-ideas/generate?symbol=${encodeURIComponent(currentSymbol)}&timeframe=scalp`, {
                       method: 'POST',
                     }).then((res) => res.json()).then((data) => {
-                      btn.disabled = false; btn.textContent = "+ Idea";
-                      fetchJson<TradeIdea[]>("/trade-ideas").then((ideas) => {
-                        if (ideas) setIdeas(ideas);
+                      btn.disabled = false; btn.textContent = "Scalp";
+                      fetchJson<TradeIdea[]>("/trade-ideas").then((newIdeas) => {
+                        if (newIdeas) {
+                          setIdeas(newIdeas);
+                          const latest = newIdeas.find((i) => i.symbol === currentSymbol && i.status === 'active');
+                          if (latest) setSelectedIdea(latest);
+                        }
                       });
+                      fetchJson<{ symbol: string; ohlcv: any[] }>(`/trade-ideas/ohlcv?symbol=${encodeURIComponent(currentSymbol)}&interval=${chartInterval}&period=auto`)
+                        .then((d) => { if (d?.ohlcv) setChartData(d.ohlcv); });
                       if (data.status === "no_setup") {
-                        alert(`AI couldn't find a setup: ${data.reason}`);
+                        alert(`AI couldn't find a scalp setup: ${data.reason}`);
                       } else if (data.detail) {
                         alert(`Error: ${data.detail}`);
                       }
                     }).catch(() => {
-                      btn.disabled = false; btn.textContent = "+ Idea";
+                      btn.disabled = false; btn.textContent = "Scalp";
+                      alert("Failed to generate idea");
+                    });
+                  }}
+                    className="rounded-sm border border-primary/50 bg-primary/10 px-3 py-1 text-[10px] font-bold uppercase tracking-widest text-primary transition hover:border-primary hover:bg-primary/20">
+                    Scalp
+                  </button>
+                  {/* Swing idea button */}
+                  <button onClick={(e) => {
+                    if (!currentSymbol) return;
+                    const btn = e.currentTarget;
+                    btn.disabled = true; btn.textContent = "AI thinking...";
+                    fetch(`${API}/trade-ideas/generate?symbol=${encodeURIComponent(currentSymbol)}&timeframe=swing`, {
+                      method: 'POST',
+                    }).then((res) => res.json()).then((data) => {
+                      btn.disabled = false; btn.textContent = "Swing";
+                      fetchJson<TradeIdea[]>("/trade-ideas").then((newIdeas) => {
+                        if (newIdeas) {
+                          setIdeas(newIdeas);
+                          const latest = newIdeas.find((i) => i.symbol === currentSymbol && i.status === 'active');
+                          if (latest) setSelectedIdea(latest);
+                        }
+                      });
+                      fetchJson<{ symbol: string; ohlcv: any[] }>(`/trade-ideas/ohlcv?symbol=${encodeURIComponent(currentSymbol)}&interval=${chartInterval}&period=auto`)
+                        .then((d) => { if (d?.ohlcv) setChartData(d.ohlcv); });
+                      if (data.status === "no_setup") {
+                        alert(`AI couldn't find a swing setup: ${data.reason}`);
+                      } else if (data.detail) {
+                        alert(`Error: ${data.detail}`);
+                      }
+                    }).catch(() => {
+                      btn.disabled = false; btn.textContent = "Swing";
                       alert("Failed to generate idea");
                     });
                   }}
                     className="rounded-sm border border-bull/50 bg-bull/10 px-3 py-1 text-[10px] font-bold uppercase tracking-widest text-bull transition hover:border-bull hover:bg-bull/20">
-                    + Idea
+                    Swing
                   </button>
                   <button onClick={() => {
                     if (!chartRef.current) return;
@@ -1049,6 +1196,16 @@ function TradeIdeasView({ initialSymbol, onClearSymbol }: { initialSymbol: strin
                     <span className="text-muted-foreground">Vol <span className="font-bold">{signalScore.volumeTrend}</span></span>
                     {signalScore.atrPct && <span className="text-muted-foreground">ATR <span className="font-bold tabular-nums">{signalScore.atrPct.toFixed(2)}%</span></span>}
                   </span>
+                  {detectedPatterns.length > 0 && detectedPatterns.map((p, i) => (
+                    <span key={i} className="flex items-center gap-2 rounded-sm border border-border/50 px-2 py-0.5">
+                      <span className={`font-bold uppercase ${p.breakout === 'up' ? 'text-bull' : p.breakout === 'down' ? 'text-bear' : 'text-primary'}`}>{p.type}</span>
+                      <span className={`font-bold ${p.breakout === 'up' ? 'text-bull' : p.breakout === 'down' ? 'text-bear' : 'text-primary'}`}>
+                        {p.breakout === 'up' ? '▲' : p.breakout === 'down' ? '▼' : '◆'} {p.breakout}
+                      </span>
+                      <span className="text-muted-foreground">{(p.confidence * 100).toFixed(0)}%</span>
+                      {p.breakout !== 'either' && <span className="tabular-nums text-foreground">@ {fmtPx(p.target)}</span>}
+                    </span>
+                  ))}
                 </div>
               )}
 
@@ -1141,6 +1298,97 @@ function TradeIdeasView({ initialSymbol, onClearSymbol }: { initialSymbol: strin
                   <p className="text-xs text-foreground">{selectedIdea.reasoning}</p>
                 </div>
               )}
+
+              {/* Pattern predictions */}
+              {detectedPatterns.length > 0 && (
+                <div className="mt-4 rounded-sm border border-border bg-background/50 p-4">
+                  <h4 className="mb-3 text-xs font-bold uppercase tracking-[0.2em] text-muted-foreground">
+                    Pattern Analysis & Predicted Outcome
+                  </h4>
+                  <div className="space-y-3">
+                    {detectedPatterns.map((p, i) => {
+                      const isBullish = p.breakout === 'up';
+                      const isBearish = p.breakout === 'down';
+                      return (
+                        <div key={i} className="rounded-sm border border-border/60 p-3">
+                          <div className="mb-2 flex items-center justify-between">
+                            <div className="flex items-center gap-3">
+                              <span className={`rounded-sm px-2 py-0.5 text-xs font-bold uppercase ${
+                                isBullish ? 'bg-bull/15 text-bull' : isBearish ? 'bg-bear/15 text-bear' : 'bg-primary/15 text-primary'
+                              }`}>
+                                {p.type}
+                              </span>
+                              <span className={`text-xs font-bold ${
+                                isBullish ? 'text-bull' : isBearish ? 'text-bear' : 'text-primary'
+                              }`}>
+                                {isBullish ? '▲ BULLISH BREAKOUT' : isBearish ? '▼ BEARISH BREAKOUT' : '◆ EITHER DIRECTION'}
+                              </span>
+                            </div>
+                            <span className="text-xs tabular-nums text-muted-foreground">
+                              Confidence: <span className="font-bold text-foreground">{(p.confidence * 100).toFixed(0)}%</span>
+                            </span>
+                          </div>
+                          <div className="grid grid-cols-3 gap-3 text-xs">
+                            <div>
+                              <div className="text-[9px] uppercase tracking-widest text-muted-foreground">Upper Bound</div>
+                              <div className="font-bold tabular-nums">{fmtPx(p.upper.endPrice)}</div>
+                            </div>
+                            <div>
+                              <div className="text-[9px] uppercase tracking-widest text-muted-foreground">Lower Bound</div>
+                              <div className="font-bold tabular-nums">{fmtPx(p.lower.endPrice)}</div>
+                            </div>
+                            <div>
+                              <div className="text-[9px] uppercase tracking-widest text-muted-foreground">Target</div>
+                              <div className={`font-bold tabular-nums ${isBullish ? 'text-bull' : isBearish ? 'text-bear' : 'text-primary'}`}>
+                                {p.breakout !== 'either' ? fmtPx(p.target) : '—'}
+                              </div>
+                            </div>
+                          </div>
+                          <div className="mt-2 text-xs text-muted-foreground">
+                            {isBullish && `Price is consolidating in a ${p.type}. Most likely outcome: breakout above ${fmtPx(p.upper.endPrice)} targeting ${fmtPx(p.target)} (${p.confidence >= 0.6 ? 'high' : 'moderate'} probability).`}
+                            {isBearish && `Price is consolidating in a ${p.type}. Most likely outcome: breakdown below ${fmtPx(p.lower.endPrice)} targeting ${fmtPx(p.target)} (${p.confidence >= 0.6 ? 'high' : 'moderate'} probability).`}
+                            {!isBullish && !isBearish && `Price is in a ${p.type} formation. Breakout could go either direction — wait for confirmation before entering.`}
+                          </div>
+                          {p.breakout !== 'either' && currentSymbol && (
+                            <button onClick={() => {
+                              const lastBar = chartData[chartData.length - 1] as any;
+                              const entry = lastBar?.close ?? 0;
+                              const patternSide = p.breakout === 'up' ? 'long' : 'short';
+                              const sl = patternSide === 'long' ? p.lower.endPrice : p.upper.endPrice;
+                              const tp = p.target;
+                              fetch(`${API}/trade-ideas`, {
+                                method: 'POST',
+                                headers: { 'Content-Type': 'application/json' },
+                                body: JSON.stringify({
+                                  symbol: currentSymbol,
+                                  asset_class: selectedIdea?.asset_class ?? watchlist.find((w) => w.pair === currentSymbol)?.asset_class ?? 'stock',
+                                  side: patternSide,
+                                  entry_price: entry,
+                                  stop_loss: sl,
+                                  take_profit: tp,
+                                  confidence: p.confidence,
+                                  reasoning: `Pattern: ${p.type}, ${p.breakout} breakout, confidence ${(p.confidence * 100).toFixed(0)}%`,
+                                }),
+                              }).then(() => {
+                                fetchJson<TradeIdea[]>("/trade-ideas").then((data) => {
+                                  if (data) setIdeas(data);
+                                });
+                              });
+                            }}
+                              className={`mt-3 w-full rounded-sm border py-2 text-[10px] font-bold uppercase tracking-widest transition ${
+                                isBullish
+                                  ? 'border-bull/50 bg-bull/10 text-bull hover:border-bull hover:bg-bull/20'
+                                  : 'border-bear/50 bg-bear/10 text-bear hover:border-bear hover:bg-bear/20'
+                              }`}>
+                              Trade This Pattern
+                            </button>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
             </>
           ) : (
             <div className="flex h-[500px] items-center justify-center text-muted-foreground">
@@ -1149,6 +1397,18 @@ function TradeIdeasView({ initialSymbol, onClearSymbol }: { initialSymbol: strin
           )}
         </div>
       </div>
+
+      {chartTradeModal && currentSymbol && (
+        <TradeModal
+          pair={currentSymbol}
+          assetClass={(selectedIdea?.asset_class ?? watchlist.find((w) => w.pair === currentSymbol)?.asset_class ?? "stock") as AssetClass}
+          onClose={() => setChartTradeModal(null)}
+          refresh={() => { fetchJson<TradeIdea[]>("/trade-ideas").then((data) => { if (data) setIdeas(data); }); }}
+          initialSide={chartTradeModal.side}
+          initialSL={chartTradeModal.sl}
+          initialTP={chartTradeModal.tp}
+        />
+      )}
 
       {/* Analytics section */}
       {stats && stats.closed > 0 && (
@@ -1319,23 +1579,28 @@ function AssetsView({ watchlist, positions, refresh, fx, csym }:
 
 /* ──────────────── Trade Modal ──────────────── */
 
-function TradeModal({ pair, assetClass, onClose, refresh }:
-  { pair: string; assetClass: AssetClass; onClose: () => void; refresh: () => void }) {
-  const [side, setSide] = useState<"long" | "short">("long");
+function TradeModal({ pair, assetClass, onClose, refresh, initialSide, initialSL, initialTP }:
+  { pair: string; assetClass: AssetClass; onClose: () => void; refresh: () => void;
+    initialSide?: "long" | "short"; initialSL?: number | null; initialTP?: number | null }) {
+  const [side, setSide] = useState<"long" | "short">(initialSide ?? "long");
   const [size, setSize] = useState("");
   const [confidence, setConfidence] = useState("0.75");
   const [submitting, setSubmitting] = useState(false);
 
+  const [stopLoss, setStopLoss] = useState<number | null>(initialSL ?? null);
+  const [takeProfit, setTakeProfit] = useState<number | null>(initialTP ?? null);
+
   const defaults: Record<AssetClass, string> = { forex: "100000", stock: "50", crypto: "1", cfd: "5", futures: "5" };
   useEffect(() => { setSize(defaults[assetClass]); }, [assetClass]);
 
-  const submit = async () => {
+  const submit = async (orderSide: "long" | "short") => {
+    setSide(orderSide);
     setSubmitting(true);
     const res = await fetch(`${API}/positions`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        pair, asset_class: assetClass, side,
+        pair, asset_class: assetClass, side: orderSide,
         size: parseFloat(size), confidence: parseFloat(confidence),
       }),
     });
@@ -1359,20 +1624,6 @@ function TradeModal({ pair, assetClass, onClose, refresh }:
 
         <div className="space-y-4 p-4">
           <div>
-            <label className="mb-1.5 block text-[10px] font-bold uppercase tracking-[0.2em] text-muted-foreground">Direction</label>
-            <div className="flex gap-2">
-              <button onClick={() => setSide("long")}
-                className={`flex-1 rounded-sm border py-2 text-xs font-bold uppercase tracking-wider transition ${
-                  side === "long" ? "border-bull bg-bull/15 text-bull" : "border-border text-muted-foreground hover:border-bull/40"
-                }`}>Long</button>
-              <button onClick={() => setSide("short")}
-                className={`flex-1 rounded-sm border py-2 text-xs font-bold uppercase tracking-wider transition ${
-                  side === "short" ? "border-bear bg-bear/15 text-bear" : "border-border text-muted-foreground hover:border-bear/40"
-                }`}>Short</button>
-            </div>
-          </div>
-
-          <div>
             <label className="mb-1.5 block text-[10px] font-bold uppercase tracking-[0.2em] text-muted-foreground">
               Size {assetClass === "forex" ? "(units)" : assetClass === "crypto" ? "(coins)" : assetClass === "cfd" ? "(contracts)" : "(shares)"}
             </label>
@@ -1386,14 +1637,37 @@ function TradeModal({ pair, assetClass, onClose, refresh }:
               className="w-full rounded-sm border border-border bg-background px-3 py-2 text-sm font-bold tabular-nums text-foreground outline-none transition focus:border-primary" />
           </div>
 
-          <button onClick={submit} disabled={submitting || !size}
-            className={`w-full rounded-sm border py-2.5 text-xs font-bold uppercase tracking-[0.2em] transition ${
-              side === "long"
-                ? "border-bull bg-bull/15 text-bull hover:bg-bull/25"
-                : "border-bear bg-bear/15 text-bear hover:bg-bear/25"
-            } disabled:opacity-40`}>
-            {submitting ? "Opening..." : `${side === "long" ? "Buy" : "Sell"} ${pair}`}
-          </button>
+          {(stopLoss || takeProfit) && (
+            <div className="rounded-sm border border-border/60 bg-background/40 p-3">
+              <div className="mb-2 text-center text-[9px] font-bold uppercase tracking-[0.2em] text-muted-foreground">AI Predicted Levels</div>
+              <div className="flex items-center justify-center gap-3">
+                <div className="text-center">
+                  <div className="text-[9px] uppercase tracking-widest text-bear">Stop Loss</div>
+                  <div className="text-sm font-bold tabular-nums text-bear">{stopLoss ? fmtPx(stopLoss) : '—'}</div>
+                </div>
+                <button onClick={() => { const tmp = stopLoss; setStopLoss(takeProfit); setTakeProfit(tmp); }}
+                  className="rounded-sm border border-border px-2 py-1 text-[10px] font-bold text-muted-foreground transition hover:border-primary hover:text-primary"
+                  title="Swap SL and TP">
+                  ⇄
+                </button>
+                <div className="text-center">
+                  <div className="text-[9px] uppercase tracking-widest text-bull">Take Profit</div>
+                  <div className="text-sm font-bold tabular-nums text-bull">{takeProfit ? fmtPx(takeProfit) : '—'}</div>
+                </div>
+              </div>
+            </div>
+          )}
+
+          <div className="grid grid-cols-2 gap-2">
+            <button onClick={() => submit("short")} disabled={submitting || !size}
+              className="rounded-sm border border-bear bg-bear/15 py-2.5 text-xs font-bold uppercase tracking-[0.2em] text-bear transition hover:bg-bear/25 disabled:opacity-40">
+              {submitting ? "..." : `Sell ${pair}`}
+            </button>
+            <button onClick={() => submit("long")} disabled={submitting || !size}
+              className="rounded-sm border border-bull bg-bull/15 py-2.5 text-xs font-bold uppercase tracking-[0.2em] text-bull transition hover:bg-bull/25 disabled:opacity-40">
+              {submitting ? "..." : `Buy ${pair}`}
+            </button>
+          </div>
         </div>
       </div>
     </div>
@@ -1462,6 +1736,54 @@ function ConfBar({ value }: { value: number }) {
       </div>
       <span className="text-[10px] tabular-nums text-muted-foreground">{pct}</span>
     </div>
+  );
+}
+
+function WhalePanel() {
+  const [whales, setWhales] = useState<any[]>([]);
+  useEffect(() => {
+    const load = () => fetchJson<any[]>("/whales").then((data) => { if (data) setWhales(data); });
+    load();
+    const i = setInterval(load, 120_000);
+    return () => clearInterval(i);
+  }, []);
+  return (
+    <Panel title="WHALE ACTIVITY" sub={`${whales.length} signals`}>
+      <div className="max-h-[280px] space-y-1.5 overflow-y-auto pr-1">
+        {whales.length === 0 && (
+          <div className="py-6 text-center text-xs text-muted-foreground">No whale signals detected.</div>
+        )}
+        {whales.map((w, i) => (
+          <div key={i} className="flex items-start gap-2 border-b border-border/40 py-2 text-xs">
+            <span className={`shrink-0 rounded-sm px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wider ${
+              w.type === 'btc_transfer' ? 'bg-primary/15 text-primary'
+                : w.signal === 'accumulation' || w.direction === 'surge' ? 'bg-bull/15 text-bull'
+                  : 'bg-bear/15 text-bear'
+            }`}>
+              {w.type === 'btc_transfer' ? 'WHALE'
+                : w.signal === 'accumulation' ? 'BUY'
+                  : w.signal === 'distribution' ? 'SELL'
+                    : w.direction === 'surge' ? 'PUMP' : 'DUMP'}
+            </span>
+            <div className="min-w-0">
+              {w.type === 'btc_transfer' && (
+                <span className="text-foreground/90">{w.amount.toFixed(0)} BTC moved</span>
+              )}
+              {w.type?.includes('volume_spike') && (
+                <span className="text-foreground/90">
+                  <span className="font-bold">{w.symbol}</span> {w.volume_ratio}x vol, {w.price_change_pct >= 0 ? '+' : ''}{w.price_change_pct?.toFixed(1)}%
+                </span>
+              )}
+              {w.type === 'large_move' && (
+                <span className="text-foreground/90">
+                  <span className="font-bold">{w.symbol}</span> {w.change_pct >= 0 ? '+' : ''}{w.change_pct?.toFixed(1)}% in 24h
+                </span>
+              )}
+            </div>
+          </div>
+        ))}
+      </div>
+    </Panel>
   );
 }
 

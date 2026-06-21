@@ -36,3 +36,4 @@ server/.venv/
 server/__pycache__/
 server/data/
 *.pyc
+server/data/.secret

@@ -384,6 +384,7 @@ class LLMConfigUpdate(BaseModel):
 
 @app.get("/api/llm/config")
 def get_llm_config():
+    import crypto_utils
     conn = db.get_db()
     row = conn.execute("SELECT * FROM llm_config WHERE id = 1").fetchone()
     conn.close()
@@ -391,7 +392,11 @@ def get_llm_config():
         return {"provider": "ollama", "model": "minimax-m3:cloud", "api_key": "", "base_url": "", "num_ctx": 8192}
     result = dict(row)
     if result.get("api_key"):
-        result["api_key"] = result["api_key"][:8] + "..." + result["api_key"][-4:]
+        decrypted = crypto_utils.decrypt(result["api_key"])
+        if decrypted:
+            result["api_key"] = decrypted[:8] + "..." + decrypted[-4:]
+        else:
+            result["api_key"] = ""
     if "num_ctx" not in result:
         result["num_ctx"] = 8192
     return result
@@ -399,15 +404,18 @@ def get_llm_config():
 @app.put("/api/llm/config")
 def update_llm_config(config: LLMConfigUpdate):
     import llm as llm_module
+    import crypto_utils
     if config.provider not in llm_module.PROVIDERS:
         raise HTTPException(400, f"Unknown provider: {config.provider}. Valid: {list(llm_module.PROVIDERS.keys())}")
+
+    encrypted_key = crypto_utils.encrypt(config.api_key) if config.api_key else ""
 
     conn = db.get_db()
     conn.execute(
         "INSERT INTO llm_config (id, provider, model, api_key, base_url, num_ctx) VALUES (1, ?, ?, ?, ?, ?) "
         "ON CONFLICT(id) DO UPDATE SET provider=excluded.provider, model=excluded.model, "
         "api_key=excluded.api_key, base_url=excluded.base_url, num_ctx=excluded.num_ctx",
-        (config.provider, config.model, config.api_key or "", config.base_url or "", config.num_ctx or 8192),
+        (config.provider, config.model, encrypted_key, config.base_url or "", config.num_ctx or 8192),
     )
     conn.commit()
     conn.close()
@@ -617,16 +625,17 @@ _GENERATE_IDEA_RATE_LIMIT: dict[str, float] = {}
 _RATE_LIMIT_WINDOW = 10  # seconds between requests per symbol
 
 @app.post("/api/trade-ideas/generate")
-def generate_trade_idea(symbol: str):
+def generate_trade_idea(symbol: str, timeframe: str = "swing"):
     """Ask the AI to analyze a symbol and create a trade idea with entry/SL/TP."""
     import time
-    
+
     # Rate limiting
     now = time.time()
-    last_request = _GENERATE_IDEA_RATE_LIMIT.get(symbol, 0)
+    rate_key = f"{symbol}_{timeframe}"
+    last_request = _GENERATE_IDEA_RATE_LIMIT.get(rate_key, 0)
     if now - last_request < _RATE_LIMIT_WINDOW:
         raise HTTPException(429, f"Rate limit: Wait {_RATE_LIMIT_WINDOW - (now - last_request):.1f}s before requesting {symbol} again")
-    _GENERATE_IDEA_RATE_LIMIT[symbol] = now
+    _GENERATE_IDEA_RATE_LIMIT[rate_key] = now
     
     import context as ctx
     
@@ -647,12 +656,29 @@ def generate_trade_idea(symbol: str):
         raise HTTPException(400, f"Could not fetch price for {symbol}")
     
     # Build focused prompt
-    prompt = f"""Analyze {symbol} ({asset_class}) and create a trade idea with exact price levels.
+    if timeframe == "scalp":
+        tf_rules = """This is a SCALP / QUICK trade (hold minutes to hours).
+- Focus on short-term momentum, RSI extremes, MACD crossovers, Bollinger Band bounces
+- Stop loss = entry - (1 x ATR) for long, entry + (1 x ATR) for short
+- Take profit = entry + (1.5 x ATR) for long, entry - (1.5 x ATR) for short
+- Prefer setups near support/resistance with tight risk
+- High confidence only if multiple short-term signals align"""
+    else:
+        tf_rules = """This is a SWING / LONG-TERM trade (hold days to weeks).
+- Focus on trend direction (SMA 20/50 alignment), weekly momentum, news sentiment
+- Stop loss = entry - (2 x ATR) for long, entry + (2 x ATR) for short
+- Take profit = entry + (4 x ATR) for long, entry - (4 x ATR) for short
+- Prefer setups in the direction of the major trend
+- Consider fundamental catalysts (sector strength, macro environment)"""
+
+    prompt = f"""Analyze {symbol} ({asset_class}) and create a {timeframe} trade idea with exact price levels.
 
 Current price: {current_price}
 
 Technical data:
 {market_context}
+
+{tf_rules}
 
 You MUST create a trade setup. Choose the direction (long or short) that has the strongest technical support, even if signals are weak. Only refuse if there is absolutely no price data.
 
@@ -665,12 +691,7 @@ Respond with ONLY valid JSON (no markdown, no explanation):
   "reason": "brief reason for this setup"
 }}
 
-Rules:
-- Pick the direction with stronger signals (trend, MACD, RSI alignment)
-- Stop loss = entry {'-'} (1.5 x ATR) for long, entry + (1.5 x ATR) for short
-- Take profit = entry + (3 x ATR) for long, entry {'-'} (3 x ATR) for short
-- If ATR data is missing, use 2% of entry price as ATR estimate
-- Confidence should reflect signal strength (0.5 for weak, 0.7 for moderate, 0.9 for strong)
+If ATR data is missing, use 2% of entry price as ATR estimate.
 """
     
     # Call the AI
@@ -692,15 +713,40 @@ Rules:
             cleaned = cleaned[:-3]
         cleaned = cleaned.strip()
         cleaned = re.sub(r"//[^\n]*", "", cleaned)
-        
+        # Remove trailing commas before } or ]
+        cleaned = re.sub(r",\s*([}\]])", r"\1", cleaned)
+
+        decision = None
+        # Strategy 1: direct parse
         try:
             decision = json.loads(cleaned)
         except json.JSONDecodeError:
+            pass
+
+        # Strategy 2: extract first JSON object
+        if decision is None:
             match = re.search(r"\{[\s\S]*\}", cleaned)
             if match:
-                decision = json.loads(match.group())
-            else:
-                raise HTTPException(500, f"Could not parse AI response: {result[:200]}")
+                try:
+                    decision = json.loads(match.group())
+                except json.JSONDecodeError:
+                    pass
+
+        # Strategy 3: fix single quotes and retry
+        if decision is None:
+            fixed = cleaned.replace("'", '"')
+            try:
+                decision = json.loads(fixed)
+            except json.JSONDecodeError:
+                match = re.search(r"\{[\s\S]*\}", fixed)
+                if match:
+                    try:
+                        decision = json.loads(match.group())
+                    except json.JSONDecodeError:
+                        pass
+
+        if decision is None:
+            raise HTTPException(500, f"Could not parse AI response: {result[:300]}")
         
         if decision.get("side") is None:
             return {"status": "no_setup", "reason": decision.get("reason", "No valid setup found")}
@@ -773,6 +819,7 @@ def get_ohlcv(symbol: str, period: str = "5d", interval: str = "15m"):
         df = df.dropna(subset=["Close"])
         if df.empty:
             raise HTTPException(404, f"No valid data for {symbol}")
+        df = df.sort_index()
         
         ohlcv = []
         for timestamp, row in df.iterrows():
@@ -921,6 +968,14 @@ def get_trade_idea_stats():
         "recent": recent,
         "equity_curve": equity_curve,
     }
+
+# ── Whale Activity ──
+
+@app.get("/api/whales")
+def get_whales():
+    import whales as whales_module
+    signals = whales_module.get_whale_signals()
+    return signals
 
 if __name__ == "__main__":
     import uvicorn

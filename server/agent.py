@@ -297,6 +297,15 @@ EXECUTION PRIORITY
 2. Then manage positions
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+DIVERSIFICATION RULE
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+- NEVER open the same symbol twice — skip if already have a position
+- Spread trades across DIFFERENT symbols and asset classes
+- If stocks are closed, trade crypto/forex/CFDs/futures that are open
+- Each cycle should target different assets than the previous one
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 MANDATORY ACTIVITY RULE
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
@@ -389,16 +398,19 @@ class Agent:
 
     def _load_provider(self):
         try:
+            import crypto_utils
             conn = db.get_db()
             row = conn.execute("SELECT * FROM llm_config WHERE id = 1").fetchone()
             conn.close()
             if row:
                 self._provider_name = row["provider"]
                 self._model_name = row["model"]
+                raw_key = row["api_key"] or ""
+                api_key = crypto_utils.decrypt(raw_key) if raw_key else ""
                 self._provider = llm_module.create_provider(
                     provider=row["provider"],
                     model=row["model"],
-                    api_key=row["api_key"] or "",
+                    api_key=api_key,
                     base_url=row["base_url"] or "",
                     num_ctx=row["num_ctx"] if "num_ctx" in row.keys() else 8192,
                 )
@@ -512,10 +524,15 @@ class Agent:
                 open_pnl += self._forex_pnl(p["entry_price"], pd["price"], p["size"], p["side"], p["pair"], price_data)
         equity = starting_equity + realized + open_pnl
 
-        # 3. Build rich market context (full watchlist)
-        batch = WATCHLIST
+        # 3. Build rich market context (only open markets)
+        open_markets = [ac for ac in ["forex", "stock", "crypto", "cfd", "futures"] if is_market_open(ac) and ac in self._allowed_classes]
+        batch = [(pair, ac) for pair, ac in WATCHLIST if is_market_open(ac) and ac in self._allowed_classes]
         batch_symbols = [p for p, _ in batch]
         batch_classes = [ac for _, ac in batch]
+
+        if not batch_symbols:
+            self._log("info", "SKIP", None, "No open markets right now")
+            return
 
         market_context = context.build_market_context(batch_symbols, batch_classes)
 
@@ -553,7 +570,6 @@ class Agent:
 
         # Build market status
         open_markets = [ac for ac in ["forex", "stock", "crypto", "cfd", "futures"] if is_market_open(ac) and ac in self._allowed_classes]
-        closed_markets = [ac for ac in ["forex", "stock", "crypto", "cfd", "futures"] if not is_market_open(ac) and ac in self._allowed_classes]
 
         user_msg = f"""
 === PORTFOLIO STATE ===
@@ -564,11 +580,9 @@ Realized P&L: ${realized:+,.2f}
 Open positions: {len(positions)}/10
 Deployment: {deployment_pct:.0f}% of equity
 Win rate: {win_rate:.0f}% ({wins}W / {losses}L)
-Allowed classes: {', '.join(self._allowed_classes)}
-Markets OPEN: {', '.join(open_markets) if open_markets else 'none'}
-Markets CLOSED: {', '.join(closed_markets) if closed_markets else 'none'}
 
-IMPORTANT: Do NOT open positions in closed markets. Only trade assets in OPEN markets.
+ALL assets shown below are from OPEN markets and are tradable right now.
+Open markets: {', '.join(open_markets) if open_markets else 'none'}
 
 {market_context}
 
@@ -623,33 +637,65 @@ Remember: justify every trade with specific technical/fundamental signals from t
         try:
             import re
             cleaned = text.strip()
-            cleaned = re.sub(r"<think>[\s\S]*?</think>", "", cleaned).strip()
-            if cleaned.startswith("```"):
-                first_newline = cleaned.index("\n") if "\n" in cleaned else 3
-                cleaned = cleaned[first_newline + 1:]
-            if cleaned.endswith("```"):
-                cleaned = cleaned[:-3]
-            cleaned = cleaned.strip()
-            cleaned = re.sub(r"//[^\n]*", "", cleaned)
 
+            # Strip <think> blocks (some models use these)
+            cleaned = re.sub(r"<think>[\s\S]*?</think>", "", cleaned).strip()
+
+            # Strip ALL code fence variants: ```json, ```JSON, ```, etc.
+            cleaned = re.sub(r"^```(?:json|JSON|javascript|js)?\s*\n?", "", cleaned)
+            cleaned = re.sub(r"\n?```\s*$", "", cleaned)
+            cleaned = cleaned.strip()
+
+            # Remove // comments (but not inside strings)
+            cleaned = re.sub(r"(?<![:\"\'\w])//[^\n]*", "", cleaned)
+
+            # Remove trailing commas before } or ]
+            cleaned = re.sub(r",\s*([}\]])", r"\1", cleaned)
+
+            # Strategy 1: direct parse
             try:
-                return json.loads(cleaned)
+                result = json.loads(cleaned)
+                if isinstance(result, dict):
+                    return result
             except json.JSONDecodeError:
                 pass
 
+            # Strategy 2: raw_decode scanning for { with "decisions" key
             decoder = json.JSONDecoder()
             for i, ch in enumerate(cleaned):
                 if ch == "{":
                     try:
                         obj, _ = decoder.raw_decode(cleaned[i:])
-                        if isinstance(obj, dict) and "decisions" in obj:
+                        if isinstance(obj, dict) and ("decisions" in obj or "reasoning" in obj):
                             return obj
                     except json.JSONDecodeError:
                         continue
 
+            # Strategy 3: extract largest JSON object via regex
             match = re.search(r"\{[\s\S]*\}", cleaned)
             if match:
-                return json.loads(match.group())
+                try:
+                    return json.loads(match.group())
+                except json.JSONDecodeError:
+                    # Fix single quotes and retry
+                    fixed = match.group().replace("'", '"')
+                    fixed = re.sub(r",\s*([}\]])", r"\1", fixed)
+                    try:
+                        return json.loads(fixed)
+                    except json.JSONDecodeError:
+                        pass
+
+            # Strategy 4: brute-force find any dict with decisions
+            for i, ch in enumerate(cleaned):
+                if ch == "{":
+                    for j in range(len(cleaned), i, -1):
+                        if cleaned[j - 1] == "}":
+                            try:
+                                obj = json.loads(cleaned[i:j])
+                                if isinstance(obj, dict):
+                                    return obj
+                            except (json.JSONDecodeError, ValueError):
+                                continue
 
             raise json.JSONDecodeError("No valid JSON found", cleaned, 0)
 

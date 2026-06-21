@@ -326,3 +326,209 @@ export function projectCone(
   }
   return { upper, middle, lower };
 }
+
+// ── Chart Pattern Detection ──
+
+export type PatternType =
+  | "ascending channel" | "descending channel"
+  | "ascending triangle" | "descending triangle" | "symmetrical triangle"
+  | "rising wedge" | "falling wedge"
+  | "bull flag" | "bear flag";
+
+export interface Trendline {
+  startTime: number;
+  startPrice: number;
+  endTime: number;
+  endPrice: number;
+  touches: number;
+}
+
+export interface ChartPattern {
+  type: PatternType;
+  upper: Trendline;
+  lower: Trendline;
+  breakout: "up" | "down" | "either";
+  target: number;
+  confidence: number;
+  startTime: number;
+  endTime: number;
+}
+
+interface SwingPoint {
+  index: number;
+  time: number;
+  price: number;
+  type: "high" | "low";
+}
+
+function findSwingPoints(candles: Candle[], lookback = 3): SwingPoint[] {
+  const points: SwingPoint[] = [];
+  for (let i = lookback; i < candles.length - lookback; i++) {
+    let isHigh = true, isLow = true;
+    for (let j = 1; j <= lookback; j++) {
+      if (candles[i].high <= candles[i - j].high || candles[i].high <= candles[i + j].high) isHigh = false;
+      if (candles[i].low >= candles[i - j].low || candles[i].low >= candles[i + j].low) isLow = false;
+    }
+    if (isHigh) points.push({ index: i, time: candles[i].time, price: candles[i].high, type: "high" });
+    if (isLow) points.push({ index: i, time: candles[i].time, price: candles[i].low, type: "low" });
+  }
+  return points;
+}
+
+function fitTrendline(points: SwingPoint[], tolerance = 0.005): Trendline | null {
+  if (points.length < 2) return null;
+
+  let bestLine: Trendline | null = null;
+  let bestTouches = 0;
+
+  for (let i = 0; i < points.length - 1; i++) {
+    for (let j = i + 1; j < points.length; j++) {
+      const p1 = points[i], p2 = points[j];
+      if (p2.index === p1.index) continue;
+      const slope = (p2.price - p1.price) / (p2.index - p1.index);
+
+      let touches = 0;
+      let firstTouch = p1, lastTouch = p2;
+      for (const p of points) {
+        if (p.type !== p1.type) continue;
+        const expected = p1.price + slope * (p.index - p1.index);
+        if (expected !== 0 && Math.abs(p.price - expected) / expected < tolerance) {
+          touches++;
+          if (p.index < firstTouch.index) firstTouch = p;
+          if (p.index > lastTouch.index) lastTouch = p;
+        }
+      }
+
+      if (touches >= 2 && touches > bestTouches) {
+        bestTouches = touches;
+        bestLine = {
+          startTime: firstTouch.time,
+          startPrice: firstTouch.price,
+          endTime: lastTouch.time,
+          endPrice: lastTouch.price,
+          touches,
+        };
+      }
+    }
+  }
+
+  return bestLine;
+}
+
+function classifyPattern(upper: Trendline, lower: Trendline, candles: Candle[]): ChartPattern | null {
+  const duration = upper.endTime - upper.startTime;
+  if (duration <= 0) return null;
+
+  const upperSlope = (upper.endPrice - upper.startPrice) / duration;
+  const lowerSlope = (lower.endPrice - lower.startPrice) / duration;
+  const avgPrice = (upper.startPrice + upper.endPrice + lower.startPrice + lower.endPrice) / 4;
+  const normalizedUpper = upperSlope / avgPrice * duration;
+  const normalizedLower = lowerSlope / avgPrice * duration;
+
+  const startWidth = (upper.startPrice - lower.startPrice) / avgPrice;
+  const endWidth = (upper.endPrice - lower.endPrice) / avgPrice;
+  const widthChange = endWidth - startWidth;
+
+  const threshold = 0.002;
+  const upperFlat = Math.abs(normalizedUpper) < threshold;
+  const lowerFlat = Math.abs(normalizedLower) < threshold;
+
+  let type: PatternType;
+  let breakout: "up" | "down" | "either";
+  let confidence: number;
+
+  const prePattern = candles.slice(Math.max(0, candles.length - 60), Math.max(0, candles.length - 30));
+  const preReturn = prePattern.length > 1 ? (prePattern[prePattern.length - 1].close - prePattern[0].close) / prePattern[0].close : 0;
+  const isStrongPriorMove = Math.abs(preReturn) > 0.05;
+
+  if (widthChange < -0.01) {
+    if (normalizedUpper > threshold && normalizedLower > threshold) {
+      type = "rising wedge";
+      breakout = "down";
+      confidence = Math.min(0.8, 0.4 + Math.abs(widthChange) * 5);
+    } else if (normalizedUpper < -threshold && normalizedLower < -threshold) {
+      type = "falling wedge";
+      breakout = "up";
+      confidence = Math.min(0.8, 0.4 + Math.abs(widthChange) * 5);
+    } else if (upperFlat && normalizedLower > threshold) {
+      type = "ascending triangle";
+      breakout = "up";
+      confidence = Math.min(0.75, 0.45 + upper.touches * 0.1);
+    } else if (lowerFlat && normalizedUpper < -threshold) {
+      type = "descending triangle";
+      breakout = "down";
+      confidence = Math.min(0.75, 0.45 + lower.touches * 0.1);
+    } else {
+      type = "symmetrical triangle";
+      breakout = "either";
+      confidence = Math.min(0.6, 0.3 + Math.abs(widthChange) * 4);
+    }
+  } else if (Math.abs(widthChange) < 0.01 && Math.abs(normalizedUpper) > threshold) {
+    if (isStrongPriorMove && preReturn > 0) {
+      type = "bull flag";
+      breakout = "up";
+      confidence = Math.min(0.7, 0.5 + Math.abs(preReturn));
+    } else if (isStrongPriorMove && preReturn < 0) {
+      type = "bear flag";
+      breakout = "down";
+      confidence = Math.min(0.7, 0.5 + Math.abs(preReturn));
+    } else if (normalizedUpper > 0) {
+      type = "ascending channel";
+      breakout = "up";
+      confidence = 0.55;
+    } else {
+      type = "descending channel";
+      breakout = "down";
+      confidence = 0.55;
+    }
+  } else {
+    return null;
+  }
+
+  const patternHeight = Math.abs(upper.startPrice - lower.startPrice);
+  const lastPrice = candles[candles.length - 1].close;
+  let target: number;
+  if (breakout === "up") {
+    target = upper.endPrice + patternHeight;
+  } else if (breakout === "down") {
+    target = lower.endPrice - patternHeight;
+  } else {
+    target = lastPrice;
+  }
+
+  const avgTouches = (upper.touches + lower.touches) / 2;
+  confidence = Math.min(0.9, confidence + (avgTouches - 2) * 0.05);
+
+  return {
+    type,
+    upper,
+    lower,
+    breakout,
+    target,
+    confidence,
+    startTime: upper.startTime,
+    endTime: upper.endTime,
+  };
+}
+
+export function detectPatterns(candles: Candle[]): ChartPattern[] {
+  if (candles.length < 20) return [];
+
+  const allSwings = findSwingPoints(candles, 3);
+  const highs = allSwings.filter((p) => p.type === "high");
+  const lows = allSwings.filter((p) => p.type === "low");
+
+  const cutoff = candles[Math.floor(candles.length * 0.6)]?.time ?? 0;
+  const recentHighs = highs.filter((p) => p.time >= cutoff);
+  const recentLows = lows.filter((p) => p.time >= cutoff);
+
+  if (recentHighs.length < 2 || recentLows.length < 2) return [];
+
+  const upperLine = fitTrendline(recentHighs);
+  const lowerLine = fitTrendline(recentLows);
+
+  if (!upperLine || !lowerLine) return [];
+
+  const pattern = classifyPattern(upperLine, lowerLine, candles);
+  return pattern ? [pattern] : [];
+}

@@ -317,6 +317,8 @@ def build_market_context(symbols: list[str], asset_classes: list[str]) -> str:
     sym_class = dict(zip(symbols, asset_classes))
     scored_symbols: list[tuple[float, str, dict, int, int]] = []
 
+    from agent import is_market_open
+
     for sym in symbols:
         h = history.get(sym)
         if h is None:
@@ -359,10 +361,14 @@ def build_market_context(symbols: list[str], asset_classes: list[str]) -> str:
             short_score += 1
 
         best_score = max(long_score, short_score)
+        # Boost open-market symbols so they get prioritized
+        ac = sym_class.get(sym, "")
+        if is_market_open(ac):
+            best_score += 3
         scored_symbols.append((best_score, sym, tech, long_score, short_score))
 
     scored_symbols.sort(key=lambda x: -x[0])
-    top_symbols = scored_symbols[:10]
+    top_symbols = scored_symbols[:15]
 
     for best_score, sym, tech, long_score, short_score in top_symbols:
         ac = sym_class.get(sym, "")
@@ -441,5 +447,14 @@ def build_market_context(symbols: list[str], asset_classes: list[str]) -> str:
             info_lines.append(" | ".join(parts))
     if len(info_lines) > 1:
         sections.append("\n".join(info_lines))
+
+    # ── Whale Activity ──
+    crypto_syms = [s for s, ac in zip(symbols, asset_classes) if ac == "crypto"]
+    if crypto_syms:
+        import whales
+        whale_signals = whales.get_whale_signals(crypto_syms)
+        whale_section = whales.format_whale_context(whale_signals)
+        if whale_section:
+            sections.append(whale_section)
 
     return "\n\n".join(sections)
