@@ -8,8 +8,22 @@ import { defineConfig } from "@lovable.dev/vite-tanstack-config";
 
 export default defineConfig({
   tanstackStart: {
-    // Redirect TanStack Start's bundled server entry to src/server.ts (our SSR error wrapper).
-    // nitro/vite builds from this
     server: { entry: "server" },
+  },
+  vite: {
+    server: {
+      proxy: {
+        "/api": {
+          target: "http://localhost:8000",
+          changeOrigin: true,
+          configure: (proxy, _options) => {
+            proxy.on('error', (err, _req, _res) => {
+              console.log('[Proxy Error] Python backend not running on port 8000:', err.message);
+              console.log('[Proxy Error] Start backend with: cd server && uvicorn main:app --reload');
+            });
+          },
+        },
+      },
+    },
   },
 });
