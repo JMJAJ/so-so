@@ -1,7 +1,13 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useState, useCallback } from "react";
 import React from "react";
-import { createChart, CandlestickSeries, LineSeries } from "lightweight-charts";
+import { createChart, CandlestickSeries, LineSeries, HistogramSeries, AreaSeries } from "lightweight-charts";
+import {
+  sma as calcSma, ema as calcEma, bollingerBands as calcBB,
+  rsi as calcRsi, macd as calcMacd, detectSupportResistance,
+  scoreSignals, projectCone,
+  type Candle, type SignalScore,
+} from "@/lib/indicators";
 import {
   Activity, Wallet, TrendingUp, AlertTriangle, Power,
   Gauge, Layers, ArrowUpRight, ArrowDownRight, ShieldAlert, Download,
@@ -511,6 +517,7 @@ function TradeIdeasView({ initialSymbol, onClearSymbol }: { initialSymbol: strin
   const [watchlist, setWatchlist] = useState<WatchlistItem[]>([]);
   const [textAnnotationInput, setTextAnnotationInput] = useState("");
   const [pendingTextPoint, setPendingTextPoint] = useState<{ price: number; time: any } | null>(null);
+  const [signalScore, setSignalScore] = useState<SignalScore | null>(null);
   const chartRef = React.useRef<HTMLDivElement>(null);
   const chartInstanceRef = React.useRef<any>(null);
   const seriesRef = React.useRef<any>(null);
@@ -557,60 +564,178 @@ function TradeIdeasView({ initialSymbol, onClearSymbol }: { initialSymbol: strin
   useEffect(() => {
     if (!chartRef.current || chartData.length === 0) return;
 
+    const candles: Candle[] = chartData.map((d: any) => ({
+      time: d.time, open: d.open, high: d.high, low: d.low, close: d.close, volume: d.volume ?? 0,
+    }));
+    const closes = candles.map((c) => c.close);
+    const times = candles.map((c) => c.time);
+
+    // Compute signals
+    const signals = scoreSignals(candles);
+    setSignalScore(signals);
+
+    // Compute indicators
+    const sma20Data = calcSma(closes, 20, times);
+    const sma50Data = calcSma(closes, 50, times);
+    const ema200Data = closes.length >= 200 ? calcEma(closes, 200, times) : [];
+    const bbData = calcBB(closes, times, 20, 2);
+    const rsiData = calcRsi(closes, times);
+    const macdData = calcMacd(closes, times);
+    const srLevels = detectSupportResistance(candles);
+
+    // Chart setup
     const chart = createChart(chartRef.current, {
-      layout: { background: { color: 'transparent' }, textColor: '#d1d5db' },
-      grid: { vertLines: { color: 'rgba(255,255,255,0.05)' }, horzLines: { color: 'rgba(255,255,255,0.05)' } },
+      layout: { background: { color: 'transparent' }, textColor: '#9ca3af', fontSize: 11 },
+      grid: { vertLines: { color: 'rgba(255,255,255,0.04)' }, horzLines: { color: 'rgba(255,255,255,0.04)' } },
       width: chartRef.current.clientWidth,
-      height: 500,
+      height: 700,
       crosshair: { mode: 1 },
-      timeScale: {
-        timeVisible: true,
-        secondsVisible: false,
-      },
+      timeScale: { timeVisible: true, secondsVisible: false },
+      rightPriceScale: { borderColor: 'rgba(255,255,255,0.1)' },
     });
 
+    // ── Main pane: candlesticks ──
     const series = chart.addSeries(CandlestickSeries, {
       upColor: '#10b981', downColor: '#ef4444',
       borderDownColor: '#ef4444', borderUpColor: '#10b981',
       wickDownColor: '#ef4444', wickUpColor: '#10b981',
     });
-
     series.setData(chartData);
     seriesRef.current = series;
 
-    // Add trade idea lines
+    // ── Moving averages ──
+    if (sma20Data.length > 0) {
+      const s = chart.addSeries(LineSeries, { color: '#f59e0b', lineWidth: 1, lineStyle: 0, crosshairMarkerVisible: false, priceLineVisible: false, lastValueVisible: false });
+      s.setData(sma20Data as any);
+    }
+    if (sma50Data.length > 0) {
+      const s = chart.addSeries(LineSeries, { color: '#3b82f6', lineWidth: 1, lineStyle: 0, crosshairMarkerVisible: false, priceLineVisible: false, lastValueVisible: false });
+      s.setData(sma50Data as any);
+    }
+    if (ema200Data.length > 0) {
+      const s = chart.addSeries(LineSeries, { color: '#a855f7', lineWidth: 1, lineStyle: 2, crosshairMarkerVisible: false, priceLineVisible: false, lastValueVisible: false });
+      s.setData(ema200Data as any);
+    }
+
+    // ── Bollinger Bands ──
+    if (bbData.upper.length > 0) {
+      const upperSeries = chart.addSeries(LineSeries, { color: 'rgba(156,163,175,0.4)', lineWidth: 1, lineStyle: 2, crosshairMarkerVisible: false, priceLineVisible: false, lastValueVisible: false });
+      upperSeries.setData(bbData.upper as any);
+      const lowerSeries = chart.addSeries(LineSeries, { color: 'rgba(156,163,175,0.4)', lineWidth: 1, lineStyle: 2, crosshairMarkerVisible: false, priceLineVisible: false, lastValueVisible: false });
+      lowerSeries.setData(bbData.lower as any);
+    }
+
+    // ── Support / Resistance ──
+    srLevels.forEach((lvl) => {
+      series.createPriceLine({
+        price: lvl.price,
+        color: lvl.type === 'support' ? '#10b981' : '#ef4444',
+        lineWidth: 1,
+        lineStyle: 2,
+        axisLabelVisible: true,
+        title: lvl.type === 'support' ? `S ${lvl.price.toFixed(2)}` : `R ${lvl.price.toFixed(2)}`,
+      });
+    });
+
+    // ── Prediction cone ──
+    const lastCandle = candles[candles.length - 1];
+    const atrVal = signals.atr ?? (lastCandle.close * 0.01);
+    const direction = signals.score >= 2 ? 1 : signals.score <= -2 ? -1 : 0;
+    if (direction !== 0 && times.length > 1) {
+      const barInterval = times.length > 1 ? times[1] - times[0] : 900;
+      const cone = projectCone(lastCandle.time, lastCandle.close, atrVal, direction, 12, barInterval);
+      const coneColor = direction > 0 ? 'rgba(16,185,129,0.12)' : 'rgba(239,68,68,0.12)';
+      const coneUpper = chart.addSeries(AreaSeries, {
+        topColor: coneColor, bottomColor: 'transparent',
+        lineColor: direction > 0 ? 'rgba(16,185,129,0.4)' : 'rgba(239,68,68,0.4)',
+        lineWidth: 1, crosshairMarkerVisible: false, priceLineVisible: false, lastValueVisible: false,
+      });
+      coneUpper.setData(cone.upper as any);
+      const coneLower = chart.addSeries(LineSeries, {
+        color: direction > 0 ? 'rgba(16,185,129,0.25)' : 'rgba(239,68,68,0.25)',
+        lineWidth: 1, lineStyle: 2, crosshairMarkerVisible: false, priceLineVisible: false, lastValueVisible: false,
+      });
+      coneLower.setData(cone.lower as any);
+    }
+
+    // ── Trade idea lines ──
     if (selectedIdea) {
       series.createPriceLine({ price: selectedIdea.entry_price, color: '#3b82f6', lineWidth: 2, lineStyle: 0, axisLabelVisible: true, title: 'Entry' });
       if (selectedIdea.stop_loss) series.createPriceLine({ price: selectedIdea.stop_loss, color: '#ef4444', lineWidth: 2, lineStyle: 2, axisLabelVisible: true, title: 'SL' });
       if (selectedIdea.take_profit) series.createPriceLine({ price: selectedIdea.take_profit, color: '#10b981', lineWidth: 2, lineStyle: 2, axisLabelVisible: true, title: 'TP' });
     }
 
-    // Add annotations
+    // ── Annotations ──
     annotations.forEach((ann) => {
       if (ann.type === 'hline' && ann.data.price) {
         series.createPriceLine({ price: ann.data.price, color: ann.color || '#fbbf24', lineWidth: 1, lineStyle: 2, axisLabelVisible: true, title: ann.data.label || '' });
       } else if (ann.type === 'trendline' && ann.data.start && ann.data.end) {
-        const trendline = chart.addSeries(LineSeries, {
-          color: ann.color || '#a78bfa',
-          lineWidth: 2,
-          lineStyle: 0,
-          crosshairMarkerVisible: false,
-        });
+        const trendline = chart.addSeries(LineSeries, { color: ann.color || '#a78bfa', lineWidth: 2, lineStyle: 0, crosshairMarkerVisible: false });
         trendline.setData([
           { time: ann.data.start.time, value: ann.data.start.price },
           { time: ann.data.end.time, value: ann.data.end.price },
         ]);
       } else if (ann.type === 'zone' && ann.data.top && ann.data.bottom) {
-        // Render zone as two horizontal lines with shaded area
         series.createPriceLine({ price: ann.data.top, color: ann.color || '#3b82f6', lineWidth: 1, lineStyle: 2, axisLabelVisible: false });
         series.createPriceLine({ price: ann.data.bottom, color: ann.color || '#3b82f6', lineWidth: 1, lineStyle: 2, axisLabelVisible: false });
       } else if (ann.type === 'text' && ann.data.price && ann.data.time) {
-        // Add text as a marker with label
         series.createPriceLine({ price: ann.data.price, color: '#fbbf24', lineWidth: 1, lineStyle: 0, axisLabelVisible: true, title: ann.data.text || 'Note' });
       }
     });
 
-    // Drawing tools click handler
+    // ── Volume pane ──
+    const volumePane = chart.addPane();
+    volumePane.setStretchFactor(0.15);
+    const volumeSeries = volumePane.addSeries(HistogramSeries, {
+      priceFormat: { type: 'volume' },
+    });
+    volumeSeries.setData(candles.map((c) => ({
+      time: c.time,
+      value: c.volume,
+      color: c.close >= c.open ? 'rgba(16,185,129,0.5)' : 'rgba(239,68,68,0.5)',
+    })) as any);
+
+    // ── RSI pane ──
+    if (rsiData.length > 0) {
+      const rsiPane = chart.addPane();
+      rsiPane.setStretchFactor(0.15);
+      const rsiSeries = rsiPane.addSeries(LineSeries, {
+        color: '#a78bfa', lineWidth: 1, crosshairMarkerVisible: false,
+        priceLineVisible: false, lastValueVisible: true,
+      });
+      rsiSeries.setData(rsiData as any);
+      // Overbought / oversold reference lines
+      const ob = rsiPane.addSeries(LineSeries, { color: 'rgba(239,68,68,0.3)', lineWidth: 1, lineStyle: 2, crosshairMarkerVisible: false, priceLineVisible: false, lastValueVisible: false });
+      ob.setData(rsiData.map((p) => ({ time: p.time, value: 70 })) as any);
+      const os = rsiPane.addSeries(LineSeries, { color: 'rgba(16,185,129,0.3)', lineWidth: 1, lineStyle: 2, crosshairMarkerVisible: false, priceLineVisible: false, lastValueVisible: false });
+      os.setData(rsiData.map((p) => ({ time: p.time, value: 30 })) as any);
+    }
+
+    // ── MACD pane ──
+    if (macdData.line.length > 0) {
+      const macdPane = chart.addPane();
+      macdPane.setStretchFactor(0.15);
+      const macdLine = macdPane.addSeries(LineSeries, {
+        color: '#3b82f6', lineWidth: 1, crosshairMarkerVisible: false,
+        priceLineVisible: false, lastValueVisible: true,
+      });
+      macdLine.setData(macdData.line as any);
+      if (macdData.signal.length > 0) {
+        const sigLine = macdPane.addSeries(LineSeries, {
+          color: '#f97316', lineWidth: 1, crosshairMarkerVisible: false,
+          priceLineVisible: false, lastValueVisible: false,
+        });
+        sigLine.setData(macdData.signal as any);
+      }
+      if (macdData.histogram.length > 0) {
+        const histSeries = macdPane.addSeries(HistogramSeries, {
+          priceLineVisible: false, lastValueVisible: false,
+        });
+        histSeries.setData(macdData.histogram as any);
+      }
+    }
+
+    // ── Drawing tools click handler ──
     if (drawMode) {
       chart.subscribeClick((param) => {
         if (!param.point || !param.seriesData) return;
@@ -902,6 +1027,30 @@ function TradeIdeasView({ initialSymbol, onClearSymbol }: { initialSymbol: strin
                   </button>
                 </div>
               </div>
+
+              {/* Signal summary bar */}
+              {signalScore && (
+                <div className="mb-2 flex flex-wrap items-center gap-3 rounded-sm border border-border/60 bg-background/40 px-3 py-2 text-[10px]">
+                  <span className={`font-bold uppercase tracking-widest ${
+                    signalScore.overall.includes('BUY') ? 'text-bull'
+                      : signalScore.overall.includes('SELL') ? 'text-bear'
+                        : 'text-muted-foreground'
+                  }`}>{signalScore.overall}</span>
+                  <span className="h-3 w-px bg-border" />
+                  <span className="flex items-center gap-1"><span className="inline-block h-0.5 w-3 rounded" style={{ background: '#f59e0b' }} /> <span className="text-muted-foreground">SMA20</span></span>
+                  <span className="flex items-center gap-1"><span className="inline-block h-0.5 w-3 rounded" style={{ background: '#3b82f6' }} /> <span className="text-muted-foreground">SMA50</span></span>
+                  <span className="flex items-center gap-1"><span className="inline-block h-0.5 w-3 rounded border-b border-dashed" style={{ borderColor: '#a855f7' }} /> <span className="text-muted-foreground">EMA200</span></span>
+                  <span className="flex items-center gap-1"><span className="inline-block h-0.5 w-3 rounded border-b border-dashed" style={{ borderColor: '#9ca3af' }} /> <span className="text-muted-foreground">BB</span></span>
+                  <span className="ml-auto flex items-center gap-3">
+                    <span className="text-muted-foreground">RSI <span className={`font-bold tabular-nums ${signalScore.rsi && signalScore.rsi > 70 ? 'text-bear' : signalScore.rsi && signalScore.rsi < 30 ? 'text-bull' : 'text-foreground'}`}>{signalScore.rsi?.toFixed(0) ?? '—'}</span><span className="ml-1 text-[9px]">{signalScore.rsiLabel}</span></span>
+                    <span className="text-muted-foreground">MACD <span className={`font-bold ${signalScore.macdCross === 'bullish' ? 'text-bull' : signalScore.macdCross === 'bearish' ? 'text-bear' : 'text-foreground'}`}>{signalScore.macdCross}</span></span>
+                    <span className="text-muted-foreground">Trend <span className={`font-bold ${signalScore.trend === 'uptrend' ? 'text-bull' : signalScore.trend === 'downtrend' ? 'text-bear' : 'text-foreground'}`}>{signalScore.trend}</span></span>
+                    <span className="text-muted-foreground">BB <span className="font-bold">{signalScore.bollingerPos}</span></span>
+                    <span className="text-muted-foreground">Vol <span className="font-bold">{signalScore.volumeTrend}</span></span>
+                    {signalScore.atrPct && <span className="text-muted-foreground">ATR <span className="font-bold tabular-nums">{signalScore.atrPct.toFixed(2)}%</span></span>}
+                  </span>
+                </div>
+              )}
 
               {pendingTextPoint && (
                 <div className="mb-2 flex items-center gap-2 rounded-sm border border-primary/50 bg-primary/5 px-3 py-2">
