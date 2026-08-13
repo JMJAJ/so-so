@@ -46,6 +46,16 @@ pip install -r requirements.txt
 
 ### Running the Application
 
+On Windows, start the backend and frontend together:
+
+```powershell
+.\start-nexus.ps1
+```
+
+The launcher uses `server/.venv` when available, keeps backend logs in the Windows temporary directory, and shuts the backend down when the frontend exits.
+
+For separate terminals:
+
 #### Terminal 1: Start Python Backend
 
 ```bash
@@ -161,8 +171,11 @@ python -m pytest  # (when tests are added)
 
 ## 📊 Features
 
-- **Real-time Trading:** Live positions tracking across multiple asset classes
-- **AI Agent:** Autonomous trading decisions using LLM
+- **Paper Execution:** Audited, preview-first paper orders with modeled friction
+- **Guarded AI:** Advisory and guarded-autopilot modes; every proposal passes deterministic risk checks
+- **Risk Controls:** Fixed conservative, balanced, and aggressive presets plus a kill switch
+- **Data Honesty:** Quote freshness, delayed/proxy labeling, and accuracy-gated derivatives
+- **Ledger Migration:** Existing SQLite history is backed up and preserved without invented outcomes
 - **Technical Analysis:** Built-in indicators (RSI, MACD, Bollinger Bands, etc.)
 - **Trade Ideas:** AI-generated trade setups with entry/SL/TP levels
 - **Chart Annotations:** Draw support/resistance, trendlines, zones
@@ -170,9 +183,9 @@ python -m pytest  # (when tests are added)
 - **Multi-Asset Support:** Forex, stocks, crypto, CFDs, futures
 - **Portfolio Analytics:** P&L tracking, win rate, profit factor, equity curve
 
-## 🐛 Known Issues
+## Operating Boundary
 
-None currently. All critical issues have been fixed.
+NEXUS is a local, single-user paper-trading and research terminal. It does not connect to a brokerage or place real-money orders. The free yfinance feed can be delayed and is explicitly labeled as such; stale or research-only quotes cannot create paper fills.
 
 ## 📝 Development Notes
 

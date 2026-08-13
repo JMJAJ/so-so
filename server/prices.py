@@ -1,173 +1,165 @@
+"""Market-data adapter with canonical quote metadata and per-instrument caching."""
+
+from __future__ import annotations
+
 import time
-import yfinance as yf
-import pandas as pd
+from datetime import datetime, timezone
 from typing import Optional
 
-_cache: dict[str, dict] = {}
-_cache_time: float = 0
+import pandas as pd
+import yfinance as yf
+
+from instruments import Instrument, is_market_open, resolve_instrument
+
+
 CACHE_TTL = 10
+STALE_AFTER = {"crypto": 15 * 60, "forex": 30 * 60, "stock": 45 * 60, "cfd": 60 * 60, "futures": 60 * 60}
+_cache: dict[str, dict] = {}
 
-_CURRENCIES = {"USD", "EUR", "GBP", "JPY", "CHF", "AUD", "CAD", "NZD", "CNY", "HKD", "SEK", "NOK", "MXN", "ZAR", "SGD", "KRW", "INR", "BRL", "RUB", "TRY", "CZK", "PLN"}
 
-_CFD_MAP = {
-    "US500": "^GSPC",
-    "US30": "^DJI",
-    "NAS100": "^IXIC",
-    "US2000": "^RUT",
-    "GER40": "^GDAXI",
-    "UK100": "^FTSE",
-    "JPN225": "^N225",
-    "XAU/USD": "GC=F",
-    "XAG/USD": "SI=F",
-    "WTI": "CL=F",
-    "BRENT": "BZ=F",
-    "NATGAS": "NG=F",
-    "COPPER": "HG=F",
-    "VIX": "^VIX",
-}
+def pair_to_yfinance(value: str, asset_class: str | None = None) -> str:
+    instrument = resolve_instrument(value, asset_class)
+    if instrument:
+        return instrument.provider_symbol
+    normalized = value.strip().upper()
+    if "/" in normalized:
+        base, quote = normalized.split("/", 1)
+        currencies = {"USD", "EUR", "GBP", "JPY", "CHF", "AUD", "CAD", "NZD", "CZK"}
+        return f"{base}{quote}=X" if base in currencies and quote in currencies else f"{base}-{quote}"
+    return normalized
 
-_FUTURES_MAP = {
-    "ES": "ES=F",    # E-mini S&P 500
-    "NQ": "NQ=F",    # E-mini Nasdaq 100
-    "YM": "YM=F",    # E-mini Dow
-    "RTY": "RTY=F",  # E-mini Russell 2000
-    "ZB": "ZB=F",    # 30-Year Treasury Bond
-    "ZN": "ZN=F",    # 10-Year Treasury Note
-    "ZC": "ZC=F",    # Corn
-    "ZS": "ZS=F",    # Soybeans
-    "ZW": "ZW=F",    # Wheat
-    "GOLD": "GC=F",  # Gold
-    "SILVER": "SI=F",  # Silver
-    "USOIL": "CL=F",  # Crude Oil WTI
-}
 
-def pair_to_yfinance(pair: str) -> str:
-    p = pair.strip().upper()
-    if p in _CFD_MAP:
-        return _CFD_MAP[p]
-    if p in _FUTURES_MAP:
-        return _FUTURES_MAP[p]
-    if "/" in p:
-        parts = p.split("/")
-        if len(parts) == 2:
-            base, quote = parts[0], parts[1]
-            if base in _CURRENCIES and quote in _CURRENCIES:
-                return f"{base}{quote}=X"
-            return f"{base}-{quote}"
-    return p
+def _timestamp_seconds(value) -> float:
+    try:
+        ts = value.to_pydatetime() if hasattr(value, "to_pydatetime") else value
+        if getattr(ts, "tzinfo", None) is None:
+            ts = ts.replace(tzinfo=timezone.utc)
+        return ts.timestamp()
+    except Exception:
+        return time.time()
+
+
+def _public_quote(instrument: Instrument, cached: dict | None) -> dict:
+    now = time.time()
+    if not cached:
+        return {
+            "instrument_id": instrument.id, "symbol": instrument.symbol, "price": None,
+            "change": None, "change_pct": None, "as_of": None, "source": "yfinance",
+            "delayed": True, "stale": True,
+            "market_status": "open" if is_market_open(instrument) else "closed",
+        }
+    age = max(0, now - cached["as_of_epoch"])
+    stale = age > STALE_AFTER[instrument.asset_class]
+    return {
+        "instrument_id": instrument.id,
+        "symbol": instrument.symbol,
+        "price": cached["price"],
+        "change": cached["change"],
+        "change_pct": cached["change_pct"],
+        "as_of": datetime.fromtimestamp(cached["as_of_epoch"], timezone.utc).isoformat(),
+        "source": "yfinance",
+        "delayed": True,
+        "stale": stale,
+        "market_status": "open" if is_market_open(instrument) else "closed",
+    }
+
+
+def fetch_quotes(instrument_ids: list[str]) -> dict[str, dict]:
+    instruments = [resolve_instrument(value) for value in instrument_ids]
+    instruments = [item for item in instruments if item is not None]
+    now = time.time()
+    missing = [item for item in instruments if item.id not in _cache or now - _cache[item.id]["fetched_at"] >= CACHE_TTL]
+    if missing:
+        _refresh(missing)
+    return {item.id: _public_quote(item, _cache.get(item.id)) for item in instruments}
+
+
+def _refresh(instruments: list[Instrument]) -> None:
+    provider_map: dict[str, list[Instrument]] = {}
+    for instrument in instruments:
+        provider_map.setdefault(instrument.provider_symbol, []).append(instrument)
+    provider_symbols = sorted(provider_map)
+    fetched_at = time.time()
+
+    for start in range(0, len(provider_symbols), 12):
+        batch = provider_symbols[start:start + 12]
+        try:
+            frame = yf.download(
+                batch, period="5d", interval="5m", group_by="ticker",
+                auto_adjust=True, threads=True, progress=False,
+            )
+        except Exception:
+            continue
+        if frame is None or frame.empty:
+            continue
+        multi = isinstance(frame.columns, pd.MultiIndex)
+        for provider_symbol in batch:
+            try:
+                if multi:
+                    if provider_symbol not in frame.columns.get_level_values(0):
+                        continue
+                    closes = frame[provider_symbol]["Close"].dropna()
+                elif len(batch) == 1 and "Close" in frame.columns:
+                    closes = frame["Close"].dropna()
+                else:
+                    continue
+                if closes.empty:
+                    continue
+                price = float(closes.iloc[-1])
+                previous = float(closes.iloc[-2]) if len(closes) > 1 else price
+                epoch = _timestamp_seconds(closes.index[-1])
+                change = price - previous
+                payload = {
+                    "price": price,
+                    "change": change,
+                    "change_pct": (change / previous * 100) if previous else 0,
+                    "as_of_epoch": epoch,
+                    "fetched_at": fetched_at,
+                }
+                for instrument in provider_map[provider_symbol]:
+                    _cache[instrument.id] = payload.copy()
+            except Exception:
+                continue
+
+
+def fetch_quote(instrument_id: str) -> dict | None:
+    instrument = resolve_instrument(instrument_id)
+    if not instrument:
+        return None
+    return fetch_quotes([instrument.id]).get(instrument.id)
+
 
 def fetch_prices(symbols: list[str]) -> dict[str, dict]:
-    global _cache, _cache_time
+    """Compatibility shape for technical-analysis and legacy endpoints."""
+    resolved = [(symbol, resolve_instrument(symbol)) for symbol in symbols]
+    quote_map = fetch_quotes([item.id for _, item in resolved if item])
+    result: dict[str, dict] = {}
+    for symbol, instrument in resolved:
+        if not instrument:
+            continue
+        quote = quote_map.get(instrument.id)
+        if quote and quote["price"] is not None:
+            result[symbol] = {
+                "price": quote["price"], "change": quote["change"],
+                "changePct": quote["change_pct"], "prevClose": quote["price"] - (quote["change"] or 0),
+                "as_of": quote["as_of"], "stale": quote["stale"], "source": quote["source"],
+            }
+    return result
 
-    now = time.time()
-    if now - _cache_time < CACHE_TTL and _cache:
-        return _filter_cache(symbols)
 
-    yf_symbols = {s: pair_to_yfinance(s) for s in symbols}
-    yf_tickers = sorted(set(yf_symbols.values()))
+def fetch_single(pair: str, asset_class: str | None = None) -> Optional[float]:
+    instrument = resolve_instrument(pair, asset_class)
+    if not instrument:
+        return None
+    quote = fetch_quote(instrument.id)
+    return quote["price"] if quote and quote["price"] is not None else None
 
-    result = {}
-    BATCH_SIZE = 10
 
-    for i in range(0, len(yf_tickers), BATCH_SIZE):
-        batch = yf_tickers[i:i + BATCH_SIZE]
-        try:
-            df = yf.download(
-                batch,
-                period="1mo",
-                interval="1h",
-                group_by="ticker",
-                auto_adjust=True,
-                threads=True,
-                progress=False,
-            )
-
-            if df is not None and not df.empty:
-                is_multi = isinstance(df.columns, pd.MultiIndex)
-
-                for yf_sym in batch:
-                    try:
-                        if is_multi:
-                            if yf_sym in df.columns.get_level_values(0):
-                                ticker_df = df[yf_sym]
-                                if "Close" in ticker_df.columns:
-                                    closes = ticker_df["Close"].dropna()
-                                else:
-                                    continue
-                            else:
-                                continue
-                        else:
-                            if len(batch) == 1 and "Close" in df.columns:
-                                closes = df["Close"].dropna()
-                            else:
-                                continue
-
-                        if closes.empty:
-                            continue
-
-                        price = float(closes.iloc[-1])
-                        prev = float(closes.iloc[-2]) if len(closes) > 1 else price
-                        change = price - prev
-                        change_pct = (change / prev) * 100 if prev != 0 else 0
-
-                        result[yf_sym] = {
-                            "price": price,
-                            "change": change,
-                            "changePct": change_pct,
-                            "prevClose": prev,
-                        }
-                    except Exception:
-                        pass
-
-        except Exception:
-            pass
-
-    failed = [t for t in yf_tickers if t not in result]
-    if failed:
-        try:
-            tickers_obj = yf.Tickers(" ".join(failed))
-            for yf_sym in failed:
-                try:
-                    t = tickers_obj.tickers.get(yf_sym)
-                    if t is None:
-                        continue
-                    hist = t.history(period="5d")
-                    if hist.empty or "Close" not in hist.columns:
-                        continue
-                    closes = hist["Close"].dropna()
-                    if closes.empty:
-                        continue
-                    price = float(closes.iloc[-1])
-                    prev = float(closes.iloc[-2]) if len(closes) > 1 else price
-                    change = price - prev
-                    change_pct = (change / prev) * 100 if prev != 0 else 0
-                    result[yf_sym] = {
-                        "price": price,
-                        "change": change,
-                        "changePct": change_pct,
-                        "prevClose": prev,
-                    }
-                except Exception:
-                    pass
-        except Exception:
-            pass
-
-    reverse_map: dict[str, list[str]] = {}
-    for original, yf_sym in yf_symbols.items():
-        reverse_map.setdefault(yf_sym, []).append(original)
-
-    full = {}
-    for yf_sym, data in result.items():
-        for original in reverse_map.get(yf_sym, []):
-            full[original] = data
-
-    _cache = full
-    _cache_time = now
-    return _filter_cache(symbols)
-
-def fetch_single(pair: str) -> Optional[float]:
-    data = fetch_prices([pair])
-    return data[pair]["price"] if pair in data else None
-
-def _filter_cache(symbols: list[str]) -> dict[str, dict]:
-    return {s: _cache[s] for s in symbols if s in _cache}
+def provider_health() -> dict:
+    sample = fetch_quote("crypto:btc-usd")
+    return {
+        "provider": "yfinance",
+        "ok": bool(sample and sample["price"] is not None),
+        "sample_as_of": sample.get("as_of") if sample else None,
+        "delayed": True,
+    }

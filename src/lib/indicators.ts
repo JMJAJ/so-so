@@ -68,7 +68,12 @@ export function ema(closes: number[], period: number, times: number[]): Indicato
   return result;
 }
 
-export function bollingerBands(closes: number[], times: number[], period = 20, stdDev = 2): BollingerResult {
+export function bollingerBands(
+  closes: number[],
+  times: number[],
+  period = 20,
+  stdDev = 2,
+): BollingerResult {
   const upper: IndicatorPoint[] = [];
   const middle: IndicatorPoint[] = [];
   const lower: IndicatorPoint[] = [];
@@ -96,7 +101,8 @@ export function rsi(closes: number[], times: number[], period = 14): IndicatorPo
     gains.push(delta > 0 ? delta : 0);
     losses.push(delta < 0 ? -delta : 0);
   }
-  let avgGain = 0, avgLoss = 0;
+  let avgGain = 0,
+    avgLoss = 0;
   for (let i = 0; i < period; i++) {
     avgGain += gains[i];
     avgLoss += losses[i];
@@ -151,11 +157,13 @@ export function atr(candles: Candle[], period = 14): number[] {
   const trs: number[] = [];
   for (let i = 1; i < candles.length; i++) {
     const prev = candles[i - 1].close;
-    trs.push(Math.max(
-      candles[i].high - candles[i].low,
-      Math.abs(candles[i].high - prev),
-      Math.abs(candles[i].low - prev),
-    ));
+    trs.push(
+      Math.max(
+        candles[i].high - candles[i].low,
+        Math.abs(candles[i].high - prev),
+        Math.abs(candles[i].low - prev),
+      ),
+    );
   }
   const result: number[] = [];
   let sum = 0;
@@ -171,10 +179,13 @@ export function detectSupportResistance(candles: Candle[], lookback = 5): SRLeve
   const levels: SRLevel[] = [];
   const lastPrice = candles[candles.length - 1]?.close ?? 0;
   for (let i = lookback; i < candles.length - lookback; i++) {
-    let isHigh = true, isLow = true;
+    let isHigh = true,
+      isLow = true;
     for (let j = 1; j <= lookback; j++) {
-      if (candles[i].high <= candles[i - j].high || candles[i].high <= candles[i + j].high) isHigh = false;
-      if (candles[i].low >= candles[i - j].low || candles[i].low >= candles[i + j].low) isLow = false;
+      if (candles[i].high <= candles[i - j].high || candles[i].high <= candles[i + j].high)
+        isHigh = false;
+      if (candles[i].low >= candles[i - j].low || candles[i].low >= candles[i + j].low)
+        isLow = false;
     }
     if (isHigh) {
       levels.push({
@@ -212,9 +223,7 @@ export function detectSupportResistance(candles: Candle[], lookback = 5): SRLeve
     clustered.push({ price: sum / count, type, strength: count });
   }
 
-  return clustered
-    .sort((a, b) => b.strength - a.strength)
-    .slice(0, 6);
+  return clustered.sort((a, b) => b.strength - a.strength).slice(0, 6);
 }
 
 export function scoreSignals(candles: Candle[]): SignalScore {
@@ -234,7 +243,8 @@ export function scoreSignals(candles: Candle[]): SignalScore {
   const lastSma50 = sma50.length > 0 ? sma50[sma50.length - 1].value : null;
   const lastRsi = rsiData.length > 0 ? rsiData[rsiData.length - 1].value : null;
   const lastMacd = macdData.line.length > 0 ? macdData.line[macdData.line.length - 1].value : null;
-  const lastSignal = macdData.signal.length > 0 ? macdData.signal[macdData.signal.length - 1].value : null;
+  const lastSignal =
+    macdData.signal.length > 0 ? macdData.signal[macdData.signal.length - 1].value : null;
   const lastBBUpper = bb.upper.length > 0 ? bb.upper[bb.upper.length - 1].value : null;
   const lastBBLower = bb.lower.length > 0 ? bb.lower[bb.lower.length - 1].value : null;
   const lastAtr = atrData.length > 0 ? atrData[atrData.length - 1] : null;
@@ -265,8 +275,10 @@ export function scoreSignals(candles: Candle[]): SignalScore {
     else if (lastPrice < lastBBLower + range * 0.15) bollingerPos = "near lower";
   }
 
-  const avgVol = candles.slice(-20).reduce((s, c) => s + c.volume, 0) / Math.min(20, candles.length);
-  const recentVol = candles.slice(-5).reduce((s, c) => s + c.volume, 0) / Math.min(5, candles.length);
+  const avgVol =
+    candles.slice(-20).reduce((s, c) => s + c.volume, 0) / Math.min(20, candles.length);
+  const recentVol =
+    candles.slice(-5).reduce((s, c) => s + c.volume, 0) / Math.min(5, candles.length);
   const volumeTrend: "above avg" | "below avg" = recentVol > avgVol ? "above avg" : "below avg";
 
   let score = 0;
@@ -330,10 +342,15 @@ export function projectCone(
 // ── Chart Pattern Detection ──
 
 export type PatternType =
-  | "ascending channel" | "descending channel"
-  | "ascending triangle" | "descending triangle" | "symmetrical triangle"
-  | "rising wedge" | "falling wedge"
-  | "bull flag" | "bear flag";
+  | "ascending channel"
+  | "descending channel"
+  | "ascending triangle"
+  | "descending triangle"
+  | "symmetrical triangle"
+  | "rising wedge"
+  | "falling wedge"
+  | "bull flag"
+  | "bear flag";
 
 export interface Trendline {
   startTime: number;
@@ -364,12 +381,16 @@ interface SwingPoint {
 function findSwingPoints(candles: Candle[], lookback = 3): SwingPoint[] {
   const points: SwingPoint[] = [];
   for (let i = lookback; i < candles.length - lookback; i++) {
-    let isHigh = true, isLow = true;
+    let isHigh = true,
+      isLow = true;
     for (let j = 1; j <= lookback; j++) {
-      if (candles[i].high <= candles[i - j].high || candles[i].high <= candles[i + j].high) isHigh = false;
-      if (candles[i].low >= candles[i - j].low || candles[i].low >= candles[i + j].low) isLow = false;
+      if (candles[i].high <= candles[i - j].high || candles[i].high <= candles[i + j].high)
+        isHigh = false;
+      if (candles[i].low >= candles[i - j].low || candles[i].low >= candles[i + j].low)
+        isLow = false;
     }
-    if (isHigh) points.push({ index: i, time: candles[i].time, price: candles[i].high, type: "high" });
+    if (isHigh)
+      points.push({ index: i, time: candles[i].time, price: candles[i].high, type: "high" });
     if (isLow) points.push({ index: i, time: candles[i].time, price: candles[i].low, type: "low" });
   }
   return points;
@@ -383,12 +404,14 @@ function fitTrendline(points: SwingPoint[], tolerance = 0.005): Trendline | null
 
   for (let i = 0; i < points.length - 1; i++) {
     for (let j = i + 1; j < points.length; j++) {
-      const p1 = points[i], p2 = points[j];
+      const p1 = points[i],
+        p2 = points[j];
       if (p2.index === p1.index) continue;
       const slope = (p2.price - p1.price) / (p2.index - p1.index);
 
       let touches = 0;
-      let firstTouch = p1, lastTouch = p2;
+      let firstTouch = p1,
+        lastTouch = p2;
       for (const p of points) {
         if (p.type !== p1.type) continue;
         const expected = p1.price + slope * (p.index - p1.index);
@@ -415,15 +438,19 @@ function fitTrendline(points: SwingPoint[], tolerance = 0.005): Trendline | null
   return bestLine;
 }
 
-function classifyPattern(upper: Trendline, lower: Trendline, candles: Candle[]): ChartPattern | null {
+function classifyPattern(
+  upper: Trendline,
+  lower: Trendline,
+  candles: Candle[],
+): ChartPattern | null {
   const duration = upper.endTime - upper.startTime;
   if (duration <= 0) return null;
 
   const upperSlope = (upper.endPrice - upper.startPrice) / duration;
   const lowerSlope = (lower.endPrice - lower.startPrice) / duration;
   const avgPrice = (upper.startPrice + upper.endPrice + lower.startPrice + lower.endPrice) / 4;
-  const normalizedUpper = upperSlope / avgPrice * duration;
-  const normalizedLower = lowerSlope / avgPrice * duration;
+  const normalizedUpper = (upperSlope / avgPrice) * duration;
+  const normalizedLower = (lowerSlope / avgPrice) * duration;
 
   const startWidth = (upper.startPrice - lower.startPrice) / avgPrice;
   const endWidth = (upper.endPrice - lower.endPrice) / avgPrice;
@@ -437,8 +464,14 @@ function classifyPattern(upper: Trendline, lower: Trendline, candles: Candle[]):
   let breakout: "up" | "down" | "either";
   let confidence: number;
 
-  const prePattern = candles.slice(Math.max(0, candles.length - 60), Math.max(0, candles.length - 30));
-  const preReturn = prePattern.length > 1 ? (prePattern[prePattern.length - 1].close - prePattern[0].close) / prePattern[0].close : 0;
+  const prePattern = candles.slice(
+    Math.max(0, candles.length - 60),
+    Math.max(0, candles.length - 30),
+  );
+  const preReturn =
+    prePattern.length > 1
+      ? (prePattern[prePattern.length - 1].close - prePattern[0].close) / prePattern[0].close
+      : 0;
   const isStrongPriorMove = Math.abs(preReturn) > 0.05;
 
   if (widthChange < -0.01) {

@@ -7,17 +7,18 @@ import {
   HeadContent,
   Scripts,
 } from "@tanstack/react-router";
-import { useEffect, type ReactNode } from "react";
+import type { ReactNode } from "react";
 
 import appCss from "../styles.css?url";
-import { supabase } from "@/integrations/supabase/client";
 import { Toaster } from "@/components/ui/sonner";
 
 function NotFoundComponent() {
   return (
     <div className="flex min-h-screen items-center justify-center bg-background px-4">
       <div className="terminal-panel max-w-md p-8 text-center">
-        <div className="font-mono text-xs uppercase tracking-widest text-primary">ERR_404 // ROUTE_NOT_FOUND</div>
+        <div className="font-mono text-xs uppercase tracking-widest text-primary">
+          ERR_404 // ROUTE_NOT_FOUND
+        </div>
         <h1 className="mt-4 font-display text-6xl font-bold text-foreground">404</h1>
         <p className="mt-3 text-sm text-muted-foreground">This terminal path does not exist.</p>
         <Link
@@ -38,15 +39,27 @@ function ErrorComponent({ error, reset }: { error: Error; reset: () => void }) {
   return (
     <div className="flex min-h-screen items-center justify-center bg-background px-4">
       <div className="terminal-panel max-w-md p-8 text-center">
-        <div className="font-mono text-xs uppercase tracking-widest text-destructive">SYS_ERROR // RUNTIME</div>
+        <div className="font-mono text-xs uppercase tracking-widest text-destructive">
+          SYS_ERROR // RUNTIME
+        </div>
         <h1 className="mt-4 font-display text-2xl font-bold">Terminal disconnected</h1>
         <p className="mt-2 text-sm text-muted-foreground">An exception interrupted the feed.</p>
         <div className="mt-6 flex justify-center gap-2">
           <button
-            onClick={() => { router.invalidate(); reset(); }}
+            onClick={() => {
+              router.invalidate();
+              reset();
+            }}
             className="rounded-sm bg-primary px-4 py-2 text-xs font-bold uppercase tracking-widest text-primary-foreground"
-          >Reconnect</button>
-          <a href="/" className="rounded-sm border border-border px-4 py-2 text-xs font-bold uppercase tracking-widest">Home</a>
+          >
+            Reconnect
+          </button>
+          <a
+            href="/"
+            className="rounded-sm border border-border px-4 py-2 text-xs font-bold uppercase tracking-widest"
+          >
+            Home
+          </a>
         </div>
       </div>
     </div>
@@ -59,10 +72,17 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
       { charSet: "utf-8" },
       { name: "viewport", content: "width=device-width, initial-scale=1" },
       { title: "NEXUS // AI Trading Terminal" },
-      { name: "description", content: "Autonomous AI trading terminal — live forex and crypto positions, P&L and decisions." },
+      {
+        name: "description",
+        content:
+          "Autonomous AI trading terminal — live forex and crypto positions, P&L and decisions.",
+      },
       { name: "theme-color", content: "#0a0a0a" },
       { property: "og:title", content: "NEXUS // AI Trading Terminal" },
-      { property: "og:description", content: "Autonomous AI trading terminal — live positions, P&L and AI decisions." },
+      {
+        property: "og:description",
+        content: "Autonomous AI trading terminal — live positions, P&L and AI decisions.",
+      },
       { property: "og:type", content: "website" },
       { name: "twitter:card", content: "summary" },
     ],
@@ -77,7 +97,9 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
 function RootShell({ children }: { children: ReactNode }) {
   return (
     <html lang="en" className="dark">
-      <head><HeadContent /></head>
+      <head>
+        <HeadContent />
+      </head>
       <body>
         {children}
         <Scripts />
@@ -88,16 +110,6 @@ function RootShell({ children }: { children: ReactNode }) {
 
 function RootComponent() {
   const { queryClient } = Route.useRouteContext();
-  const router = useRouter();
-
-  useEffect(() => {
-    const { data: sub } = supabase.auth.onAuthStateChange((event) => {
-      if (event !== "SIGNED_IN" && event !== "SIGNED_OUT" && event !== "USER_UPDATED") return;
-      router.invalidate();
-      if (event !== "SIGNED_OUT") queryClient.invalidateQueries();
-    });
-    return () => sub.subscription.unsubscribe();
-  }, [router, queryClient]);
 
   return (
     <QueryClientProvider client={queryClient}>
