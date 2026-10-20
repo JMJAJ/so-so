@@ -71,17 +71,18 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
     meta: [
       { charSet: "utf-8" },
       { name: "viewport", content: "width=device-width, initial-scale=1" },
-      { title: "NEXUS // AI Trading Terminal" },
+      { title: "NEXUS // Evidence-based investment research" },
       {
         name: "description",
         content:
-          "Autonomous AI trading terminal — live forex and crypto positions, P&L and decisions.",
+          "AI investment research grounded in market and news history, verified with paper trading.",
       },
       { name: "theme-color", content: "#0a0a0a" },
-      { property: "og:title", content: "NEXUS // AI Trading Terminal" },
+      { property: "og:title", content: "NEXUS // Evidence-based investment research" },
       {
         property: "og:description",
-        content: "Autonomous AI trading terminal — live positions, P&L and AI decisions.",
+        content:
+          "AI investment research grounded in market and news history, verified with paper trading.",
       },
       { property: "og:type", content: "website" },
       { name: "twitter:card", content: "summary" },

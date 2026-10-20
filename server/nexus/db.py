@@ -1,0 +1,330 @@
+"""SQLite storage for NEXUS v3.
+
+One file, WAL mode, short-lived connections. Every table that holds history is
+keyed by date so ingestion is idempotent (INSERT OR REPLACE / ON CONFLICT).
+"""
+
+from __future__ import annotations
+
+import json
+import os
+import sqlite3
+from contextlib import contextmanager
+from datetime import datetime, timezone
+from typing import Any, Iterator
+
+DATA_DIR = os.environ.get("NEXUS_DATA_DIR", os.path.join(os.path.dirname(os.path.dirname(__file__)), "data"))
+DB_PATH = os.environ.get("NEXUS_DB_PATH", os.path.join(DATA_DIR, "nexus_v3.db"))
+SCHEMA_VERSION = 3
+
+SCHEMA = """
+CREATE TABLE IF NOT EXISTS bars (
+    instrument_id TEXT NOT NULL,
+    date TEXT NOT NULL,
+    open REAL, high REAL, low REAL, close REAL NOT NULL, volume REAL,
+    PRIMARY KEY (instrument_id, date)
+) WITHOUT ROWID;
+
+CREATE TABLE IF NOT EXISTS macro_series (
+    series_id TEXT NOT NULL,
+    date TEXT NOT NULL,
+    value REAL NOT NULL,
+    PRIMARY KEY (series_id, date)
+) WITHOUT ROWID;
+
+CREATE TABLE IF NOT EXISTS theme_series (
+    theme TEXT NOT NULL,
+    date TEXT NOT NULL,
+    count REAL NOT NULL,
+    tone REAL,
+    goldstein REAL,
+    PRIMARY KEY (theme, date)
+) WITHOUT ROWID;
+
+-- Structured, dated events with long history (earnings, rate moves, macro
+-- surprises, market shocks, geopolitical spikes). Event studies run on these.
+CREATE TABLE IF NOT EXISTS events (
+    id TEXT PRIMARY KEY,
+    type TEXT NOT NULL,
+    instrument_id TEXT,
+    scope TEXT NOT NULL,
+    date TEXT NOT NULL,
+    magnitude REAL,
+    surprise REAL,
+    title TEXT NOT NULL,
+    source TEXT NOT NULL,
+    approx_date INTEGER NOT NULL DEFAULT 0,
+    meta TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_events_type_date ON events(type, date);
+CREATE INDEX IF NOT EXISTS idx_events_instrument ON events(instrument_id, date);
+CREATE INDEX IF NOT EXISTS idx_events_date ON events(date DESC);
+
+-- Headline archive. Grows over time; classified by the LLM into the event taxonomy.
+CREATE TABLE IF NOT EXISTS news (
+    id TEXT PRIMARY KEY,
+    published_at TEXT NOT NULL,
+    title TEXT NOT NULL,
+    summary TEXT,
+    url TEXT,
+    source TEXT,
+    provider TEXT NOT NULL,
+    tickers TEXT,
+    category TEXT,
+    direction INTEGER,
+    magnitude INTEGER,
+    affected TEXT,
+    rationale TEXT,
+    tone REAL,
+    classified_at TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_news_published ON news(published_at DESC);
+CREATE INDEX IF NOT EXISTS idx_news_category ON news(category, published_at DESC);
+
+CREATE TABLE IF NOT EXISTS event_impact (
+    type TEXT NOT NULL,
+    instrument_id TEXT NOT NULL,
+    horizon INTEGER NOT NULL,
+    n INTEGER NOT NULL,
+    mean REAL, median REAL, baseline REAL, edge REAL,
+    hit_rate REAL, t_stat REAL, p_value REAL,
+    measure TEXT NOT NULL,
+    computed_at TEXT NOT NULL,
+    PRIMARY KEY (type, instrument_id, horizon)
+) WITHOUT ROWID;
+
+CREATE TABLE IF NOT EXISTS signal_stats (
+    signal TEXT NOT NULL,
+    asset_class TEXT NOT NULL,
+    horizon INTEGER NOT NULL,
+    n INTEGER NOT NULL,
+    ic REAL, hit_rate REAL, mean_excess REAL, long_short REAL, t_stat REAL,
+    period_start TEXT, period_end TEXT,
+    computed_at TEXT NOT NULL,
+    PRIMARY KEY (signal, asset_class, horizon)
+) WITHOUT ROWID;
+
+CREATE TABLE IF NOT EXISTS models (
+    asset_class TEXT PRIMARY KEY,
+    horizon INTEGER NOT NULL,
+    payload TEXT NOT NULL,
+    computed_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS recommendations (
+    id TEXT PRIMARY KEY,
+    created_at TEXT NOT NULL,
+    instrument_id TEXT NOT NULL,
+    direction TEXT NOT NULL,
+    horizon_days INTEGER NOT NULL,
+    entry_price REAL NOT NULL,
+    stop REAL NOT NULL,
+    target REAL NOT NULL,
+    expected_return REAL,
+    probability REAL NOT NULL,
+    confidence TEXT NOT NULL,
+    thesis TEXT NOT NULL,
+    catalysts TEXT,
+    evidence TEXT,
+    invalidation TEXT,
+    signal_snapshot TEXT,
+    source TEXT NOT NULL,
+    run_id TEXT,
+    status TEXT NOT NULL,
+    position_id TEXT,
+    expires_at TEXT NOT NULL,
+    closed_at TEXT,
+    exit_price REAL,
+    exit_reason TEXT,
+    realized_return REAL,
+    benchmark_return REAL,
+    excess_return REAL,
+    mark_price REAL,
+    mark_return REAL,
+    marked_at TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_recs_status ON recommendations(status, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_recs_instrument ON recommendations(instrument_id);
+
+CREATE TABLE IF NOT EXISTS positions (
+    id TEXT PRIMARY KEY,
+    instrument_id TEXT NOT NULL,
+    side TEXT NOT NULL,
+    quantity REAL NOT NULL,
+    status TEXT NOT NULL,
+    entry_price REAL,
+    entry_fee REAL NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL,
+    opened_at TEXT,
+    stop REAL,
+    target REAL,
+    expires_at TEXT,
+    recommendation_id TEXT,
+    source TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS trades (
+    id TEXT PRIMARY KEY,
+    position_id TEXT NOT NULL,
+    instrument_id TEXT NOT NULL,
+    side TEXT NOT NULL,
+    quantity REAL NOT NULL,
+    entry_price REAL NOT NULL,
+    exit_price REAL NOT NULL,
+    opened_at TEXT NOT NULL,
+    closed_at TEXT NOT NULL,
+    gross_pnl REAL NOT NULL,
+    fees REAL NOT NULL,
+    net_pnl REAL NOT NULL,
+    exit_reason TEXT NOT NULL,
+    recommendation_id TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_trades_closed ON trades(closed_at DESC);
+
+CREATE TABLE IF NOT EXISTS equity_snapshots (
+    date TEXT PRIMARY KEY,
+    equity REAL NOT NULL,
+    cash REAL NOT NULL,
+    exposure REAL NOT NULL,
+    spy_close REAL
+) WITHOUT ROWID;
+
+CREATE TABLE IF NOT EXISTS settings (
+    key TEXT PRIMARY KEY,
+    value TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS jobs (
+    name TEXT PRIMARY KEY,
+    last_started TEXT,
+    last_finished TEXT,
+    last_status TEXT,
+    last_error TEXT,
+    last_summary TEXT,
+    duration_ms INTEGER
+);
+
+CREATE TABLE IF NOT EXISTS runs (
+    id TEXT PRIMARY KEY,
+    kind TEXT NOT NULL,
+    started_at TEXT NOT NULL,
+    finished_at TEXT,
+    status TEXT NOT NULL,
+    summary TEXT,
+    transcript TEXT,
+    error TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_runs_started ON runs(started_at DESC);
+
+CREATE TABLE IF NOT EXISTS conversations (
+    id TEXT PRIMARY KEY,
+    title TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS messages (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    conversation_id TEXT NOT NULL,
+    role TEXT NOT NULL,
+    content TEXT NOT NULL,
+    created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_messages_conv ON messages(conversation_id, id);
+
+CREATE TABLE IF NOT EXISTS logs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    created_at TEXT NOT NULL,
+    level TEXT NOT NULL,
+    kind TEXT NOT NULL,
+    message TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_logs_created ON logs(created_at DESC);
+
+CREATE TABLE IF NOT EXISTS schema_meta (
+    version INTEGER PRIMARY KEY,
+    applied_at TEXT NOT NULL
+);
+"""
+
+
+def now_iso() -> str:
+    return datetime.now(timezone.utc).isoformat(timespec="seconds")
+
+
+def today() -> str:
+    return datetime.now(timezone.utc).date().isoformat()
+
+
+def connect() -> sqlite3.Connection:
+    os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
+    conn = sqlite3.connect(DB_PATH, timeout=30)
+    conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA journal_mode=WAL")
+    conn.execute("PRAGMA busy_timeout=10000")
+    conn.execute("PRAGMA synchronous=NORMAL")
+    return conn
+
+
+@contextmanager
+def session() -> Iterator[sqlite3.Connection]:
+    conn = connect()
+    try:
+        yield conn
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
+
+
+def init_db() -> None:
+    with session() as conn:
+        conn.executescript(SCHEMA)
+        conn.execute(
+            "INSERT OR IGNORE INTO schema_meta(version, applied_at) VALUES(?, ?)",
+            (SCHEMA_VERSION, now_iso()),
+        )
+
+
+def rows(sql: str, params: tuple | list = ()) -> list[dict]:
+    with session() as conn:
+        return [dict(row) for row in conn.execute(sql, params).fetchall()]
+
+
+def one(sql: str, params: tuple | list = ()) -> dict | None:
+    with session() as conn:
+        row = conn.execute(sql, params).fetchone()
+        return dict(row) if row else None
+
+
+def execute(sql: str, params: tuple | list = ()) -> None:
+    with session() as conn:
+        conn.execute(sql, params)
+
+
+def executemany(sql: str, params: list[tuple]) -> None:
+    if not params:
+        return
+    with session() as conn:
+        conn.executemany(sql, params)
+
+
+def log(level: str, kind: str, message: str) -> None:
+    try:
+        execute("INSERT INTO logs(created_at, level, kind, message) VALUES(?,?,?,?)", (now_iso(), level, kind, message[:2000]))
+    except sqlite3.Error:
+        pass
+
+
+def dumps(value: Any) -> str:
+    return json.dumps(value, default=str, separators=(",", ":"))
+
+
+def loads(value: str | None, default: Any = None) -> Any:
+    if not value:
+        return default
+    try:
+        return json.loads(value)
+    except (TypeError, ValueError):
+        return default

@@ -1,0 +1,176 @@
+"""Runtime settings (DB-backed with defaults) and encrypted secrets.
+
+Environment variables always win over stored secrets so keys can live in .env.
+"""
+
+from __future__ import annotations
+
+import base64
+import hashlib
+import os
+
+from . import db
+
+ROOT_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+SECRET_PATH = os.path.join(db.DATA_DIR, ".secret")
+
+SECRET_ENV = {
+    "anthropic_api_key": "ANTHROPIC_API_KEY",
+    "openai_api_key": "OPENAI_API_KEY",
+    "openrouter_api_key": "OPENROUTER_API_KEY",
+    "finnhub_api_key": "FINNHUB_API_KEY",
+    "fred_api_key": "FRED_API_KEY",
+}
+
+DEFAULTS: dict[str, str] = {
+    "llm_provider": "anthropic",
+    "llm_model": "claude-sonnet-5-5",
+    "llm_fast_model": "claude-haiku-5-5",
+    "llm_base_url": "",
+    "autopilot": "true",
+    "starting_equity": "100000",
+    "risk_per_trade": "0.01",
+    "max_positions": "12",
+    "max_exposure": "1.0",
+    "analyst_shortlist": "12",
+    "analyst_max_recs": "5",
+    "min_probability": "0.55",
+    "enabled_classes": "stock,etf,crypto,forex,commodity",
+    "history_years": "10",
+    "gdelt_backfill_days": "365",
+    "scheduler_enabled": "true",
+}
+
+
+def _load_dotenv() -> None:
+    for path in (os.path.join(ROOT_DIR, ".env"), os.path.join(ROOT_DIR, "server", ".env")):
+        if not os.path.exists(path):
+            continue
+        with open(path, encoding="utf-8") as handle:
+            for line in handle:
+                line = line.strip()
+                if not line or line.startswith("#") or "=" not in line:
+                    continue
+                key, value = line.split("=", 1)
+                os.environ.setdefault(key.strip(), value.strip().strip('"').strip("'"))
+
+
+_load_dotenv()
+
+
+def get(key: str) -> str:
+    row = db.one("SELECT value FROM settings WHERE key=?", (key,))
+    if row:
+        return row["value"]
+    if key == "llm_provider" and not os.environ.get("ANTHROPIC_API_KEY") and not _stored_secret("anthropic_api_key"):
+        if os.environ.get("OPENAI_API_KEY"):
+            return "openai"
+        if os.environ.get("OPENROUTER_API_KEY"):
+            return "openrouter"
+    return DEFAULTS.get(key, "")
+
+
+def get_float(key: str) -> float:
+    try:
+        return float(get(key))
+    except ValueError:
+        return float(DEFAULTS[key])
+
+
+def get_int(key: str) -> int:
+    return int(get_float(key))
+
+
+def get_bool(key: str) -> bool:
+    return get(key).lower() in ("1", "true", "yes", "on")
+
+
+def set_many(values: dict[str, str]) -> None:
+    db.executemany(
+        "INSERT INTO settings(key, value) VALUES(?, ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+        [(key, str(value)) for key, value in values.items() if key in DEFAULTS],
+    )
+
+
+def all_settings() -> dict[str, str]:
+    stored = {row["key"]: row["value"] for row in db.rows("SELECT key, value FROM settings")}
+    return {key: stored.get(key, get(key)) for key in DEFAULTS}
+
+
+# ── Secrets ──────────────────────────────────────────────────────────────────
+
+def _key() -> bytes:
+    env = os.environ.get("NEXUS_SECRET")
+    if env:
+        secret = env
+    elif os.path.exists(SECRET_PATH):
+        with open(SECRET_PATH, encoding="utf-8") as handle:
+            secret = handle.read().strip()
+    else:
+        secret = base64.urlsafe_b64encode(os.urandom(32)).decode()
+        os.makedirs(os.path.dirname(SECRET_PATH), exist_ok=True)
+        with open(SECRET_PATH, "w", encoding="utf-8") as handle:
+            handle.write(secret)
+    return hashlib.sha256(secret.encode()).digest()
+
+
+def _encrypt(plaintext: str) -> str:
+    from cryptography.hazmat.primitives import padding
+    from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
+
+    iv = os.urandom(16)
+    padder = padding.PKCS7(128).padder()
+    padded = padder.update(plaintext.encode()) + padder.finalize()
+    encryptor = Cipher(algorithms.AES(_key()), modes.CBC(iv)).encryptor()
+    return base64.urlsafe_b64encode(iv + encryptor.update(padded) + encryptor.finalize()).decode()
+
+
+def _decrypt(ciphertext: str) -> str:
+    from cryptography.hazmat.primitives import padding
+    from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
+
+    raw = base64.urlsafe_b64decode(ciphertext)
+    decryptor = Cipher(algorithms.AES(_key()), modes.CBC(raw[:16])).decryptor()
+    padded = decryptor.update(raw[16:]) + decryptor.finalize()
+    unpadder = padding.PKCS7(128).unpadder()
+    return (unpadder.update(padded) + unpadder.finalize()).decode()
+
+
+def _stored_secret(name: str) -> str:
+    row = db.one("SELECT value FROM settings WHERE key=?", (f"secret:{name}",))
+    if not row or not row["value"]:
+        return ""
+    try:
+        return _decrypt(row["value"])
+    except Exception:
+        return ""
+
+
+def secret(name: str) -> str:
+    env_name = SECRET_ENV.get(name)
+    if env_name and os.environ.get(env_name):
+        return os.environ[env_name]
+    return _stored_secret(name)
+
+
+def set_secret(name: str, value: str) -> None:
+    if name not in SECRET_ENV:
+        raise ValueError(f"Unknown secret {name}")
+    stored = _encrypt(value) if value else ""
+    db.execute(
+        "INSERT INTO settings(key, value) VALUES(?, ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+        (f"secret:{name}", stored),
+    )
+
+
+def secret_status() -> dict[str, dict]:
+    result = {}
+    for name, env_name in SECRET_ENV.items():
+        from_env = bool(os.environ.get(env_name))
+        value = secret(name)
+        result[name] = {
+            "set": bool(value),
+            "source": "env" if from_env else ("stored" if value else None),
+            "hint": f"…{value[-4:]}" if len(value) > 8 else None,
+        }
+    return result
