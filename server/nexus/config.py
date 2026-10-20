@@ -18,6 +18,7 @@ SECRET_ENV = {
     "anthropic_api_key": "ANTHROPIC_API_KEY",
     "openai_api_key": "OPENAI_API_KEY",
     "openrouter_api_key": "OPENROUTER_API_KEY",
+    "nvidia_api_key": "NVIDIA_API_KEY",
     "finnhub_api_key": "FINNHUB_API_KEY",
     "fred_api_key": "FRED_API_KEY",
 }
@@ -62,11 +63,22 @@ def get(key: str) -> str:
     row = db.one("SELECT value FROM settings WHERE key=?", (key,))
     if row:
         return row["value"]
+    if key in ("llm_model", "llm_fast_model"):
+        # Model defaults follow the chosen provider (Claude ids only make sense on Anthropic).
+        from .llm import PROVIDERS
+
+        meta = PROVIDERS.get(get("llm_provider"), {})
+        if key == "llm_model" and meta.get("default_model"):
+            return meta["default_model"]
+        if key == "llm_fast_model" and get("llm_provider") != "anthropic":
+            return meta.get("fast_model", "")
     if key == "llm_provider" and not os.environ.get("ANTHROPIC_API_KEY") and not _stored_secret("anthropic_api_key"):
         if os.environ.get("OPENAI_API_KEY"):
             return "openai"
         if os.environ.get("OPENROUTER_API_KEY"):
             return "openrouter"
+        if os.environ.get("NVIDIA_API_KEY"):
+            return "nvidia"
     return DEFAULTS.get(key, "")
 
 

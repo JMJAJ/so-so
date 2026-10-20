@@ -465,7 +465,13 @@ export interface Settings {
   secrets: Record<string, { set: boolean; source: string | null; hint: string | null }>;
   providers: Record<
     string,
-    { label: string; default_model: string; key: string | null; base_url?: string }
+    {
+      label: string;
+      default_model: string;
+      fast_model?: string;
+      key: string | null;
+      base_url?: string;
+    }
   >;
   asset_classes: string[];
 }

@@ -22,6 +22,7 @@ const SECRET_LABELS: Record<string, string> = {
   anthropic_api_key: "Anthropic API key",
   openai_api_key: "OpenAI API key",
   openrouter_api_key: "OpenRouter API key",
+  nvidia_api_key: "NVIDIA NIM API key (free tier)",
   finnhub_api_key: "Finnhub API key (optional, company news)",
 };
 
@@ -95,7 +96,11 @@ function SettingsForm() {
                 const next = event.target.value;
                 set("llm_provider", next);
                 set("llm_model", data.providers[next]?.default_model ?? "");
-                if (next !== "anthropic") set("llm_fast_model", "");
+                set(
+                  "llm_fast_model",
+                  data.providers[next]?.fast_model ??
+                    (next === "anthropic" ? "claude-haiku-5-5" : ""),
+                );
               }}
             >
               {Object.entries(data.providers).map(([key, meta]) => (
