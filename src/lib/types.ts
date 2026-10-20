@@ -496,14 +496,40 @@ export interface ChatMessage {
     is_error?: boolean;
     preview?: string;
   }>;
+  charts?: ChatChart[];
   pending?: boolean;
 }
+
+/** Charts the AI puts in chat via the show_chart tool (built server-side from stored data). */
+export type ChatChart =
+  | {
+      kind: "line";
+      title: string;
+      format: "price" | "pct";
+      series: Array<{ name: string; points: Array<{ x: string; y: number | null }> }>;
+      levels: Array<{ label: string; value: number; tone: "amber" | "bull" | "bear" }>;
+      markers: Array<{ x: string; label: string }>;
+    }
+  | {
+      kind: "fan";
+      title: string;
+      horizon: number;
+      fan: NonNullable<AnalogResult["fan"]>;
+    }
+  | {
+      kind: "bar";
+      title: string;
+      format: "pct" | "number" | "money";
+      bars: Array<{ label: string; value: number; note?: string }>;
+      note?: string;
+    };
 
 export type ChatEvent =
   | { type: "conversation"; id: string }
   | { type: "text"; text: string }
   | { type: "tool_call"; id: string; name: string; input: Record<string, unknown> }
   | { type: "tool_result"; id: string; name: string; is_error: boolean; preview: string }
+  | { type: "chart"; id: string; chart: ChatChart }
   | { type: "done"; stop_reason: string }
   | { type: "error"; message: string }
   | { type: "end" };

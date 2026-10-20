@@ -71,6 +71,7 @@ the GDELT history backfills in the background.
 
 | View | What it's for |
 |---|---|
+| **AI chat** | Full-page chat with conversation history, inline charts and the slash commands below |
 | **Today** | Market regime, the AI's brief, open calls with live marks, events that historically move markets, classified headlines |
 | **Screener** | Every instrument with its signal z-scores and 20-session forecast |
 | **Asset** | Candles with event markers; forecast breakdown; analog fan chart; event history with every past occurrence; correlations and lead-lag drivers; news; past AI calls |
@@ -79,8 +80,17 @@ the GDELT history backfills in the background.
 | **Track record** | Hit rate, excess return, Brier score, calibration, breakdowns by evidence type, quant model validation |
 | **Settings** | LLM provider and keys, risk, universe, background jobs, analyst runs, logs |
 
-**Ask AI** (top right) opens a chat that uses the same tools as the analyst. Slash commands:
-`/scan`, `/why NVDA`, `/recommend gold`, `/regime`, `/news`, `/backtest`, `/record`, `/portfolio`.
+**AI chat** has its own page, and **Ask AI** (top right) opens the same conversation as a sidebar on
+any other page. It uses the same tools as the analyst and can draw charts inline (price with a call's
+entry/stop/target, performance comparisons, analog fans, event studies, equity vs SPY). Charts are
+built from stored data, not from numbers the model types. Slash commands:
+
+| Command | Does |
+|---|---|
+| `/invest [focus]` | Scan, investigate the strongest candidates, record the trades with real evidence (paper positions via autopilot), chart each one |
+| `/chart <anything>` | e.g. `/chart GLD vs SPY over 2 years`, `/chart what gold did after rate cuts` |
+| `/scan`, `/why NVDA`, `/recommend gold` | Rank candidates, review one asset, record a single call |
+| `/regime`, `/news`, `/backtest`, `/record`, `/portfolio` | Macro regime, headlines with history, model validation, track record, position review |
 
 ## CLI (also usable by Claude Code)
 

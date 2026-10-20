@@ -32,6 +32,11 @@ const VIEWS: Record<
     icon: Activity,
     component: lazy(() => import("@/features/today/TodayView")),
   },
+  chat: {
+    label: "AI chat",
+    icon: MessageSquare,
+    component: lazy(() => import("@/features/chat/ChatView")),
+  },
   ideas: {
     label: "Screener",
     icon: Telescope,
@@ -74,9 +79,10 @@ export default function AppShell() {
     retry: false,
   });
   const Current = VIEWS[view].component;
+  const drawerOpen = chat.open && view !== "chat";
 
   return (
-    <div className={cn("min-h-screen transition-[padding]", chat.open && "sm:pr-[460px]")}>
+    <div className={cn("min-h-screen transition-[padding]", drawerOpen && "sm:pr-[460px]")}>
       <aside className="fixed inset-y-0 left-0 z-30 hidden w-52 flex-col border-r border-border bg-background/95 lg:flex">
         <Brand />
         <nav className="flex-1 space-y-0.5 px-2 py-3">
@@ -136,15 +142,17 @@ export default function AppShell() {
               <Loader2 className="h-3 w-3 animate-spin" /> analyst researching
             </span>
           ) : null}
-          <button
-            className={cn(
-              "primary-button inline-flex items-center gap-1.5",
-              chat.open && "!bg-primary/25",
-            )}
-            onClick={() => chat.setOpen(!chat.open)}
-          >
-            <MessageSquare className="h-3.5 w-3.5" /> Ask AI
-          </button>
+          {view !== "chat" && (
+            <button
+              className={cn(
+                "primary-button inline-flex items-center gap-1.5",
+                drawerOpen && "!bg-primary/25",
+              )}
+              onClick={() => chat.setOpen(!chat.open)}
+            >
+              <MessageSquare className="h-3.5 w-3.5" /> Ask AI
+            </button>
+          )}
         </header>
         <main className="mx-auto max-w-[1600px] px-4 py-5">
           <div className="mb-3 lg:hidden">

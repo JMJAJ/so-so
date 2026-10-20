@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from datetime import date
 from typing import Callable
 
@@ -25,7 +26,8 @@ How you work:
   are small (0.52–0.62). Stops must sit where the thesis is wrong (≈1.5–2.5× daily ATR away); targets
   should give reward/risk ≥ 1.5.
 - This is paper trading for research. You are not a licensed advisor; say so if asked for personal advice.
-Write plainly and compactly. Use markdown tables for comparisons."""
+Write plainly and compactly. Use markdown tables for comparisons, and show_chart when a picture helps
+(the user sees the chart; don't repeat all its numbers)."""
 
 
 def system_prompt(extra: str = "") -> str:
@@ -56,7 +58,7 @@ def run(
         if not reply.tool_calls:
             emit({"type": "done", "stop_reason": reply.stop_reason})
             return new
-        results = []
+        results, charts = [], []
         for call in reply.tool_calls:
             emit({"type": "tool_call", "id": call["id"], "name": call["name"], "input": call["input"]})
             blocked = guard(call["name"], call["input"]) if guard else None
@@ -64,10 +66,18 @@ def run(
                 content, is_error = f'{{"error": "{blocked}"}}', True
             else:
                 content, is_error = tools.call(call["name"], call["input"], extra=tool_extra)
+            if call["name"] == "show_chart" and not is_error:
+                # The chart goes to the UI; the model only needs the summary.
+                payload = json.loads(content)
+                charts.append(payload["chart"])
+                emit({"type": "chart", "id": call["id"], "chart": payload["chart"]})
+                content = json.dumps({"summary": payload["summary"]})
             emit({"type": "tool_result", "id": call["id"], "name": call["name"], "is_error": is_error,
                   "preview": content[:600]})
             results.append({"id": call["id"], "name": call["name"], "content": content, "is_error": is_error})
         tool_message = {"role": "tool", "results": results}
+        if charts:
+            tool_message["charts"] = charts
         history.append(tool_message)
         new.append(tool_message)
     emit({"type": "done", "stop_reason": "max_steps"})

@@ -173,15 +173,86 @@ def list_recommendations(status: str = "open") -> dict:
                      for r in recommendations.list_recs(status if status != "all" else None, 50)]}
 
 
+WEAK_EVIDENCE_CAP = 0.58
+STRONG_EVIDENCE_CAP = 0.70
+
+
+def _strongest_active_event(instrument_id: str, horizon_days: int) -> dict | None:
+    """The most reliable (largest |t|, n >= 8) historical effect among events of the last 10 days,
+    at the measured horizon closest to the call's horizon."""
+    horizon = min(event_study.HORIZONS[1:], key=lambda h: abs(h - horizon_days))
+    best = None
+    for event in event_study.recent_events(10, instrument_id):
+        impact = event_study.impact(event["type"], instrument_id)
+        stats = impact["horizons"].get(horizon) if impact else None
+        if stats and stats["n"] >= 8 and (best is None or abs(stats["t_stat"]) > abs(best["t_stat"])):
+            best = {"type": event["type"], "horizon": horizon, **stats}
+    return best
+
+
+def _evidence_cap(item: universe.Instrument, horizon_days: int, snapshot: dict | None) -> tuple[float, str]:
+    """Server-side check of evidence strength; the model's own quoted t-stats aren't trusted."""
+    if snapshot and snapshot.get("model_has_edge"):
+        return STRONG_EVIDENCE_CAP, f"the {item.asset_class} quant model has a validated walk-forward edge"
+    event = _strongest_active_event(item.id, horizon_days)
+    if event and abs(event["t_stat"]) >= 2:
+        return STRONG_EVIDENCE_CAP, (f"active {event['type']} has a reliable {event['horizon']}d history "
+                                     f"(t={event['t_stat']:.1f}, n={event['n']})")
+    reason = f"no validated model edge for {item.asset_class}s and no event from the last 10 days with |t| >= 2"
+    if event:
+        reason += f" (best: {event['type']}, t={event['t_stat']:.1f}, n={event['n']})"
+    return WEAK_EVIDENCE_CAP, reason
+
+
+def _position_status(rec: dict) -> str:
+    if not rec.get("position_id"):
+        if rec.get("trade_note"):
+            return (f"NOT OPENED: no paper position was opened ({rec['trade_note']}). The recommendation is "
+                    "still recorded and will be scored on its own.")
+        return "NOT OPENED: autopilot is off, so this is tracked as a call only."
+    position = db.one("SELECT * FROM positions WHERE id=?", (rec["position_id"],))
+    if not position:
+        return "NOT OPENED: the order was cancelled at fill time (price already through the stop)."
+    if position["status"] == "pending":
+        return (f"PENDING: {position['side']} {position['quantity']:g} {rec['symbol']} will fill at the next "
+                "market open.")
+    return (f"OPENED: {position['side']} {position['quantity']:g} {rec['symbol']} filled at "
+            f"{position['entry_price']:.4g}.")
+
+
 def propose_recommendation(**payload) -> dict:
     source = payload.pop("_source", "chat")
     run_id = payload.pop("_run_id", None)
     item = _inst(payload.get("instrument_id", ""))
     snapshot = next((row for row in scan.forecasts() if row["instrument_id"] == item.id), None)
+    stated = float(payload.get("probability", 0.5))
+    cap, reason = _evidence_cap(item, int(payload.get("horizon_days") or 20), snapshot)
+    calibration_note = None
+    if stated > cap:
+        calibration_note = f"Probability capped from {stated:.2f} to {cap:.2f}: {reason}."
+        payload["probability"] = cap
+        payload["evidence"] = [*(payload.get("evidence") or []),
+                               {"type": "calibration", "summary": calibration_note}]
+        if cap == WEAK_EVIDENCE_CAP:
+            payload["confidence"] = "low"
     rec = recommendations.create({**payload, "instrument_id": item.id}, source=source, run_id=run_id,
                                  signal_snapshot=snapshot)
-    return {"created": {k: rec.get(k) for k in ("id", "symbol", "direction", "entry_price", "stop", "target",
-                                                 "probability", "position_id", "trade_note")}}
+    status = _position_status(rec)
+    result = {
+        "paper_position": status,
+        "recorded": {k: rec.get(k) for k in ("id", "symbol", "direction", "entry_price", "stop", "target",
+                                             "probability", "confidence")},
+        "instruction": "Report the paper_position line to the user exactly as stated.",
+    }
+    if calibration_note:
+        result["calibration"] = calibration_note
+    return result
+
+
+def show_chart(**kwargs) -> dict:
+    from .charts import show_chart as build
+
+    return build(**kwargs)
 
 
 # ── Registry ─────────────────────────────────────────────────────────────────
@@ -260,9 +331,31 @@ TOOLS: dict[str, dict] = {
         "description": "List recommendations by status.",
         "parameters": {"type": "object", "properties": {"status": {"type": "string", "enum": ["open", "closed", "cancelled", "all"]}}},
     },
+    "show_chart": {
+        "fn": show_chart,
+        "description": "Display a chart to the user in the chat, built from stored data. Use it whenever a picture helps: "
+                       "price (one instrument, with event markers and any open call's entry/stop/target), compare (2-6 "
+                       "instruments, % return), analogs (fan of forward paths after similar setups), event_study (avg "
+                       "return by horizon after an event type), equity (paper account vs S&P 500), or bar (your own "
+                       "labels/values taken from tool results). You get back a one-line summary.",
+        "parameters": {"type": "object", "properties": {
+            "kind": {"type": "string", "enum": ["price", "compare", "analogs", "event_study", "equity", "bar"]},
+            "instrument": _INSTR,
+            "instruments": {"type": "array", "items": {"type": "string"}, "description": "For compare: 2-6 instruments"},
+            "event_type": {"type": "string", "enum": list(EVENT_TYPES)},
+            "years": {"type": "number", "minimum": 0.1, "maximum": 10, "description": "Lookback for price/compare (default 1)"},
+            "title": {"type": "string"},
+            "labels": {"type": "array", "items": {"type": "string"}, "description": "For bar"},
+            "values": {"type": "array", "items": {"type": "number"}, "description": "For bar; fractions for pct"},
+            "value_format": {"type": "string", "enum": ["pct", "number", "money"]}},
+            "required": ["kind"]},
+    },
     "propose_recommendation": {
         "fn": propose_recommendation,
-        "description": "Record a recommendation (and, if autopilot is on, open a paper position sized by the risk budget). Only call when the evidence supports it.",
+        "description": ("Record a recommendation (and, if autopilot is on, open a paper position sized by the risk budget). "
+                        "Only call when the evidence supports it. The server caps probability at 0.58 when there is no "
+                        "validated model edge and no event from the last 10 days with |t| >= 2 (0.70 otherwise). The "
+                        "result's paper_position line says whether a position OPENED, is PENDING or was NOT OPENED."),
         "parameters": {"type": "object", "properties": {
             "instrument_id": _INSTR,
             "direction": {"type": "string", "enum": ["long", "short"]},
@@ -302,7 +395,7 @@ def call(name: str, arguments: dict, *, extra: dict | None = None) -> tuple[str,
             kwargs.update(extra)
         result = tool["fn"](**kwargs)
         text = json.dumps(result, default=str)
-        if len(text) > MAX_CHARS:
+        if len(text) > MAX_CHARS and name != "show_chart":  # chart payloads go to the UI, not the model
             text = text[:MAX_CHARS] + '..."[truncated]"'
         return text, False
     except (ValueError, KeyError, TypeError) as exc:

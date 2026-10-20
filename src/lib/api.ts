@@ -1,6 +1,7 @@
 import type {
   AssetDetail,
   ChatEvent,
+  ChatMessage,
   Dashboard,
   EventStudyDetail,
   Forecast,
@@ -126,11 +127,7 @@ export const api = {
   conversation: (id: string) =>
     fetchJson<{
       id: string;
-      messages: Array<{
-        role: "user" | "assistant";
-        text: string;
-        tools?: Array<{ name: string; input: Record<string, unknown> }>;
-      }>;
+      messages: ChatMessage[];
     }>(`/chat/${id}`),
   deleteConversation: (id: string) =>
     fetchJson<{ deleted: boolean }>(`/chat/${id}`, send("DELETE")),

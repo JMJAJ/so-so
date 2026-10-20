@@ -170,3 +170,73 @@ def test_settings_store_secrets_encrypted(client):
     assert body["secrets"]["finnhub_api_key"]["set"] is True
     raw = db.one("SELECT value FROM settings WHERE key='secret:finnhub_api_key'")["value"]
     assert "abc123secret" not in raw
+
+
+def test_show_chart_builds_every_kind(synthetic):
+    cases = [
+        {"kind": "price", "instrument": "AAPL"},
+        {"kind": "compare", "instruments": ["AAPL", "MSFT", "SPY"], "years": 2},
+        {"kind": "analogs", "instrument": "stock:msft"},
+        {"kind": "equity"},
+        {"kind": "bar", "labels": ["a", "b"], "values": [0.01, -0.02]},
+    ]
+    for args in cases:
+        text, is_error = tools.call("show_chart", args)
+        assert not is_error, f"{args}: {text}"
+        payload = json.loads(text)
+        assert payload["chart"]["kind"] in ("line", "fan", "bar") and payload["summary"]
+    _, is_error = tools.call("show_chart", {"kind": "event_study", "instrument": "GLD"})
+    assert is_error
+
+
+def test_charts_reach_ui_but_not_model(synthetic, monkeypatch):
+    provider = ScriptedProvider([
+        Reply(text="", tool_calls=[{"id": "c1", "name": "show_chart", "input": {"kind": "price", "instrument": "SPY"}}]),
+        Reply(text="Here is SPY."),
+    ])
+    monkeypatch.setattr(llm, "create", lambda kind="main": provider)
+    events = []
+    result = chat.send(None, "/chart SPY", on_event=events.append)
+    charts = [e for e in events if e["type"] == "chart"]
+    assert len(charts) == 1 and charts[0]["chart"]["series"][0]["points"]
+    sent_back = provider.calls[1]["messages"][-1]["results"][0]["content"]
+    assert "points" not in sent_back and "summary" in sent_back
+    history = chat.public_messages(result["conversation_id"])
+    assert [m["role"] for m in history] == ["user", "assistant"]
+    assert history[1]["text"] == "Here is SPY." and len(history[1]["charts"]) == 1
+
+
+def test_invest_command_expands_with_limits(nexus_db):
+    text = chat.expand("/invest energy")
+    assert "focus: energy" in text and "propose_recommendation" in text and "show_chart" in text
+
+
+def test_propose_reports_position_and_caps_weak_probability(synthetic):
+    confident = dict(_proposal("stock:aapl"), probability=0.72, confidence="high")
+    text, is_error = tools.call("propose_recommendation", confident, extra={"_source": "chat"})
+    assert not is_error, text
+    result = json.loads(text)
+    assert result["paper_position"].startswith("OPENED:")
+    assert result["recorded"]["probability"] == pytest.approx(tools.WEAK_EVIDENCE_CAP)
+    assert result["recorded"]["confidence"] == "low"
+    assert "capped from 0.72" in result["calibration"]
+    rec = db.one("SELECT evidence FROM recommendations WHERE instrument_id='stock:aapl'")
+    assert "calibration" in rec["evidence"]
+
+
+def test_propose_says_not_opened_when_limits_block(synthetic):
+    db.execute("INSERT OR REPLACE INTO settings(key,value) VALUES('max_exposure','0.01')")
+    text, is_error = tools.call("propose_recommendation", _proposal("stock:msft"), extra={"_source": "chat"})
+    assert not is_error, text
+    result = json.loads(text)
+    assert result["paper_position"].startswith("NOT OPENED:") and "exposure" in result["paper_position"]
+    assert db.one("SELECT COUNT(*) c FROM recommendations")["c"] == 1
+
+
+def test_strong_event_history_allows_higher_probability(synthetic, monkeypatch):
+    monkeypatch.setattr(tools, "_strongest_active_event",
+                        lambda instrument_id, horizon: {"type": "rate_cut", "horizon": 20, "t_stat": 3.1, "n": 11})
+    result = json.loads(tools.call("propose_recommendation", dict(_proposal("stock:jpm"), probability=0.66),
+                                   extra={"_source": "chat"})[0])
+    assert result["recorded"]["probability"] == pytest.approx(0.66)
+    assert "calibration" not in result

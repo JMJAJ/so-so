@@ -1,7 +1,24 @@
 import { createContext, useCallback, useContext, useEffect, useState, type ReactNode } from "react";
 
-export type View = "today" | "ideas" | "asset" | "news" | "portfolio" | "record" | "settings";
-export const VIEWS: View[] = ["today", "ideas", "asset", "news", "portfolio", "record", "settings"];
+export type View =
+  | "today"
+  | "chat"
+  | "ideas"
+  | "asset"
+  | "news"
+  | "portfolio"
+  | "record"
+  | "settings";
+export const VIEWS: View[] = [
+  "today",
+  "chat",
+  "ideas",
+  "asset",
+  "news",
+  "portfolio",
+  "record",
+  "settings",
+];
 
 interface NavState {
   view: View;

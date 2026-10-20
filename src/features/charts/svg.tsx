@@ -124,11 +124,17 @@ export function LineChart({
   height = 200,
   format = (v: number) => v.toFixed(1),
   zero = false,
+  levels = [],
+  markers = [],
 }: {
   series: Series[];
   height?: number;
   format?: (value: number) => string;
   zero?: boolean;
+  /** Horizontal reference lines, e.g. a call's entry/stop/target. */
+  levels?: Array<{ label: string; value: number; color: string }>;
+  /** Dated events drawn as ticks along the bottom (hover for the label). */
+  markers?: Array<{ x: string; label: string }>;
 }) {
   const width = 600;
   const pad = { l: 46, r: 10, t: 10, b: 20 };
@@ -146,8 +152,9 @@ export function LineChart({
       </div>
     );
   }
-  const lo = Math.min(...values, ...(zero ? [0] : []));
-  const hi = Math.max(...values, ...(zero ? [0] : []));
+  const levelValues = levels.map((level) => level.value);
+  const lo = Math.min(...values, ...levelValues, ...(zero ? [0] : []));
+  const hi = Math.max(...values, ...levelValues, ...(zero ? [0] : []));
   const y = scale([lo, hi], [height - pad.b, pad.t]);
   const index = new Map(dates.map((d, i) => [d, i]));
   const x = scale([0, dates.length - 1], [pad.l, width - pad.r]);
@@ -184,6 +191,44 @@ export function LineChart({
             .join(" ");
           return <path key={s.name} d={d} fill="none" stroke={s.color} strokeWidth={1.4} />;
         })}
+        {levels.map((level) => (
+          <g key={level.label}>
+            <line
+              x1={pad.l}
+              x2={width - pad.r}
+              y1={y(level.value)}
+              y2={y(level.value)}
+              stroke={level.color}
+              strokeDasharray="5 3"
+            />
+            <text
+              x={width - pad.r - 2}
+              y={y(level.value) - 3}
+              textAnchor="end"
+              fontSize="9"
+              fill={level.color}
+            >
+              {level.label} {format(level.value)}
+            </text>
+          </g>
+        ))}
+        {markers.map((marker, i) => {
+          const at = dates.findIndex((d) => d >= marker.x);
+          if (at < 0) return null;
+          return (
+            <g key={`${marker.x}-${i}`}>
+              <title>{`${marker.x}: ${marker.label}`}</title>
+              <line
+                x1={x(at)}
+                x2={x(at)}
+                y1={height - pad.b}
+                y2={height - pad.b - 7}
+                stroke={AMBER}
+                strokeWidth={1.5}
+              />
+            </g>
+          );
+        })}
         <text x={pad.l} y={height - 5} fontSize="9" fill={MUTED}>
           {dates[0]}
         </text>
@@ -198,6 +243,52 @@ export function LineChart({
           </span>
         ))}
       </div>
+    </div>
+  );
+}
+
+/** Horizontal bars around a zero line, for comparisons and event studies. */
+export function BarChart({
+  bars,
+  format,
+}: {
+  bars: Array<{ label: string; value: number; note?: string }>;
+  format: (value: number) => string;
+}) {
+  const max = Math.max(...bars.map((bar) => Math.abs(bar.value)), 1e-9);
+  const hasNegative = bars.some((bar) => bar.value < 0);
+  return (
+    <div className="space-y-1.5">
+      {bars.map((bar) => {
+        const width = (Math.abs(bar.value) / max) * (hasNegative ? 50 : 100);
+        return (
+          <div
+            key={bar.label}
+            className="grid grid-cols-[88px_minmax(0,1fr)_72px] items-center gap-2 text-[11px]"
+          >
+            <span className="truncate text-muted-foreground" title={bar.label}>
+              {bar.label}
+            </span>
+            <div className="relative h-3 bg-muted" title={bar.note}>
+              {hasNegative && <div className="absolute left-1/2 top-0 h-full w-px bg-border" />}
+              <div
+                className={
+                  bar.value >= 0
+                    ? "absolute top-0 h-full bg-bull/80"
+                    : "absolute top-0 h-full bg-bear/80"
+                }
+                style={{
+                  left: hasNegative ? (bar.value >= 0 ? "50%" : `${50 - width}%`) : 0,
+                  width: `${width}%`,
+                }}
+              />
+            </div>
+            <span className="text-right tabular-nums" title={bar.note}>
+              {format(bar.value)}
+            </span>
+          </div>
+        );
+      })}
     </div>
   );
 }

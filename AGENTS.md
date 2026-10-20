@@ -29,12 +29,13 @@ The frontend is TanStack Start (React 19). The backend is a Python FastAPI packa
 | `server/nexus/research/correlation.py` | Peers and lead-lag drivers |
 | `server/nexus/research/signals.py` | Signal panel (shared by backtest and live) and model application |
 | `server/nexus/research/backtest.py` | Walk-forward validation per asset class, with point-in-time signal selection |
-| `server/nexus/agent/{tools,loop,analyst,chat}.py` | Tool registry, provider-neutral tool loop, daily analyst, chat |
+| `server/nexus/agent/{tools,loop,analyst,chat}.py` | Tool registry, provider-neutral tool loop, daily analyst, chat (slash commands) |
+| `server/nexus/agent/charts.py` | `show_chart` payloads built from stored data; the loop sends them to the UI and only a summary to the model |
 | `server/nexus/paper.py` | Paper broker: sizing, fills, stops/targets/expiry, portfolio |
 | `server/nexus/recommendations.py` | Recommendation lifecycle, scoring, track record, lessons |
 | `server/nexus/api.py` | All HTTP routes (chat is SSE) |
 | `server/nexus/cli.py` | `python -m nexus …` |
-| `src/features/*` | One folder per view, plus `shell/` (layout and UI primitives), `charts/`, `chat/`, `recs/` |
+| `src/features/*` | One folder per view, plus `shell/` (layout and UI primitives), `charts/`, `chat/` (shared state in `chat-context.tsx`, used by the drawer and the Chat page), `recs/` |
 | `src/lib/{api,types,format,nav}.ts(x)` | API client (`fetchJson`, `streamChat`), types, formatters, view navigation |
 
 ## Development
