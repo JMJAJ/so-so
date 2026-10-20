@@ -46,6 +46,8 @@ def _validate(payload: dict, price: float) -> dict:
         "probability": probability, "confidence": confidence, "thesis": thesis, "evidence": evidence,
         "catalysts": payload.get("catalysts") or [], "invalidation": str(payload.get("invalidation", "")),
         "expected_return": payload.get("expected_return"),
+        "stated_probability": payload.get("stated_probability"),
+        "base_probability": payload.get("base_probability"),
     }
 
 
@@ -64,12 +66,14 @@ def create(payload: dict, *, source: str, run_id: str | None = None, signal_snap
     expires_at = paper.expiry_from_now(clean["horizon_days"])
     db.execute(
         """INSERT INTO recommendations(id,created_at,instrument_id,direction,horizon_days,entry_price,stop,target,
-           expected_return,probability,confidence,thesis,catalysts,evidence,invalidation,signal_snapshot,source,run_id,
-           status,expires_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+           expected_return,probability,stated_probability,base_probability,confidence,thesis,catalysts,evidence,
+           invalidation,signal_snapshot,source,run_id,status,expires_at)
+           VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
         (rec_id, db.now_iso(), item.id, clean["direction"], clean["horizon_days"], quote["price"], clean["stop"],
-         clean["target"], clean["expected_return"], clean["probability"], clean["confidence"], clean["thesis"],
-         db.dumps(clean["catalysts"]), db.dumps(clean["evidence"]), clean["invalidation"],
-         db.dumps(signal_snapshot) if signal_snapshot else None, source, run_id, "open", expires_at),
+         clean["target"], clean["expected_return"], clean["probability"], clean["stated_probability"],
+         clean["base_probability"], clean["confidence"], clean["thesis"], db.dumps(clean["catalysts"]), db.dumps(clean["evidence"]),
+         clean["invalidation"], db.dumps(signal_snapshot) if signal_snapshot else None, source, run_id, "open",
+         expires_at),
     )
     should_trade = config.get_bool("autopilot") if auto_trade is None else auto_trade
     trade_note = None

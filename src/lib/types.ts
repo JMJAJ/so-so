@@ -125,6 +125,10 @@ export interface HorizonStats {
   hit_rate: number;
   t_stat: number;
   p_value: number;
+  /** Benjamini–Hochberg q-value across every (event × asset) test at this horizon. */
+  q_value?: number | null;
+  stable?: boolean;
+  reliable?: boolean;
 }
 
 export interface MarketEvent {
@@ -242,7 +246,22 @@ export interface RecordStats {
   worst?: number | null;
 }
 
+export interface ReplaySummary {
+  calls: number;
+  period?: [string, string];
+  hit_rate?: number;
+  avg_return?: number;
+  t_stat?: number | null;
+  avg_probability?: number;
+  avg_base?: number | null;
+  brier?: number;
+  calibration?: Array<{ bucket: string; n: number; stated: number; realized: number }>;
+  by_event_type?: Array<{ event_type: string; n: number; hit_rate: number; avg_return: number }>;
+}
+
 export interface TrackRecord {
+  replay?: ReplaySummary;
+  probability_calibration?: { k: number; basis: string };
   overall: RecordStats;
   open: { n: number; avg_mark_return: number | null };
   by_asset_class: Record<string, RecordStats>;
@@ -313,6 +332,9 @@ export interface EventEffect {
   p_value: number;
   baseline: number;
   median: number;
+  q_value?: number | null;
+  stable?: boolean;
+  reliable?: boolean;
 }
 
 export interface AssetDetail {

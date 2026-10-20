@@ -131,10 +131,39 @@ def forward_returns(closes: pd.DataFrame, horizon: int) -> pd.DataFrame:
     return closes.shift(-horizon) / closes - 1
 
 
-def abnormal_forward(closes: pd.DataFrame, horizon: int, benchmark_of: dict[str, str | None]) -> pd.DataFrame:
-    fwd = forward_returns(closes, horizon)
+BETA_WINDOW = 252
+
+
+def rolling_betas(closes: pd.DataFrame, benchmark_of: dict[str, str | None]) -> pd.DataFrame:
+    """Market-model beta of each asset to its benchmark, from the trailing year of daily
+    returns and lagged one day so the beta used at t is known at t. Assets without a
+    benchmark get NaN (their abnormal return is the raw return)."""
+    daily = closes.pct_change(fill_method=None)
+    betas = pd.DataFrame(index=closes.index, columns=closes.columns, dtype=float)
+    for bench in {b for b in benchmark_of.values() if b and b in daily}:
+        cols = [c for c, b in benchmark_of.items() if b == bench and c in daily]
+        if not cols:
+            continue
+        cov = daily[cols].rolling(BETA_WINDOW, min_periods=120).cov(daily[bench])
+        var = daily[bench].rolling(BETA_WINDOW, min_periods=120).var()
+        betas[cols] = cov.div(var, axis=0).clip(-1.0, 3.0).shift(1)
+    return betas
+
+
+def abnormal_forward(closes: pd.DataFrame, horizon: int, benchmark_of: dict[str, str | None],
+                     betas: pd.DataFrame | None = None) -> pd.DataFrame:
+    """Forward return minus beta × the benchmark's forward return (market model).
+    Gold or bonds measured against SPY get a beta near zero, so they are judged on their
+    own move instead of against an unrelated equity index. Horizon 0 = the reaction day
+    (close t-1 to close t)."""
+    if horizon == 0:
+        fwd = closes / closes.shift(1) - 1
+    else:
+        fwd = forward_returns(closes, horizon)
+    betas = rolling_betas(closes, benchmark_of) if betas is None else betas
     out = fwd.copy()
     for column, bench in benchmark_of.items():
         if column in out and bench and bench in fwd:
-            out[column] = fwd[column] - fwd[bench]
+            beta = betas[column].fillna(1.0)
+            out[column] = fwd[column] - beta * fwd[bench]
     return out

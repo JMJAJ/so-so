@@ -2,10 +2,15 @@
 
 Entry is the close of the event's reaction session (see ingest/events.py), so the
 numbers describe returns you could have captured after the news was known.
-Measure: return minus benchmark for stocks/ETFs (vs SPY) and alt-coins (vs BTC);
-raw return for FX, commodities, SPY and BTC. `edge` = event mean − the asset's
-unconditional mean over the same period. Overlapping windows make t-stats
-optimistic; treat |t| < 2 as noise.
+
+Measure: market-model abnormal return, i.e. return minus beta x benchmark (SPY for
+stocks/ETFs, BTC for alt-coins), with beta from the trailing year; raw return for FX,
+commodities, SPY and BTC. `edge` = event mean - the asset's unconditional mean.
+
+Thousands of (event x asset x horizon) tests are run, so plain t-stats produce many
+false discoveries. An effect is only `reliable` when it survives a Benjamini-Hochberg
+false-discovery correction (q <= 0.10), has n >= 8, and points the same way in the older
+and the newer half of its history.
 """
 
 from __future__ import annotations
@@ -16,10 +21,12 @@ from scipy import stats as sstats
 
 from .. import data, db, universe
 from ..taxonomy import EVENT_TYPES, label
-from .features import abnormal_forward
+from .features import abnormal_forward, rolling_betas
 
 HORIZONS = (0, 5, 10, 20, 40)
 MIN_N = 5
+RELIABLE_N = 8
+FDR_Q = 0.10
 
 
 def _benchmarks() -> dict[str, str | None]:
@@ -29,22 +36,17 @@ def _benchmarks() -> dict[str, str | None]:
 def _measure(instrument_id: str) -> str:
     item = universe.get(instrument_id)
     bench = item.benchmark_id if item else None
-    return f"vs {universe.get(bench).symbol}" if bench else "raw"
+    return f"vs {universe.get(bench).symbol} (beta-adj.)" if bench else "raw"
 
 
 def _abnormal_by_horizon(closes: pd.DataFrame) -> dict[int, pd.DataFrame]:
     bench = _benchmarks()
-    result = {h: abnormal_forward(closes, h, bench) for h in HORIZONS if h > 0}
-    one_day = closes / closes.shift(1) - 1
-    reaction = one_day.copy()
-    for column, ref in bench.items():
-        if column in reaction and ref and ref in one_day:
-            reaction[column] = one_day[column] - one_day[ref]
-    result[0] = reaction
-    return result
+    betas = rolling_betas(closes, bench)
+    return {h: abnormal_forward(closes, h, bench, betas) for h in HORIZONS}
 
 
 def _stats(sample: pd.Series, population: pd.Series) -> dict | None:
+    """`sample` is indexed by event date so it can be split into an older and a newer half."""
     sample, population = sample.dropna(), population.dropna()
     n = len(sample)
     if n < MIN_N or len(population) < 60:
@@ -53,10 +55,30 @@ def _stats(sample: pd.Series, population: pd.Series) -> dict | None:
     var = float(sample.var(ddof=1)) / n + float(population.var(ddof=1)) / len(population)
     t_stat = (mean - baseline) / np.sqrt(var) if var > 0 else 0.0
     p_value = float(2 * sstats.t.sf(abs(t_stat), df=max(n - 1, 1)))
+    ordered = sample.sort_index() if isinstance(sample.index, pd.DatetimeIndex) else sample
+    half = n // 2
+    early = float(ordered.iloc[:half].mean()) - baseline
+    late = float(ordered.iloc[half:].mean()) - baseline
+    edge = mean - baseline
+    stable = bool(half >= 3 and edge != 0 and np.sign(early) == np.sign(edge) == np.sign(late))
     return {
         "n": n, "mean": mean, "median": float(sample.median()), "baseline": baseline,
-        "edge": mean - baseline, "hit_rate": float((sample > 0).mean()), "t_stat": float(t_stat), "p_value": p_value,
+        "edge": edge, "hit_rate": float((sample > 0).mean()), "t_stat": float(t_stat), "p_value": p_value,
+        "edge_early": early, "edge_late": late, "stable": stable,
     }
+
+
+def benjamini_hochberg(p_values: list[float]) -> list[float]:
+    """q-values controlling the false discovery rate across a family of tests."""
+    m = len(p_values)
+    if m == 0:
+        return []
+    order = np.argsort(p_values)
+    ranked = np.array(p_values)[order] * m / np.arange(1, m + 1)
+    q_sorted = np.minimum.accumulate(ranked[::-1])[::-1].clip(max=1.0)
+    q = np.empty(m)
+    q[order] = q_sorted
+    return q.tolist()
 
 
 def _sample(abn: pd.DataFrame, instrument_id: str, dates: pd.DatetimeIndex) -> pd.Series:
@@ -77,9 +99,8 @@ def compute_all(progress=None) -> int:
 
     def add(event_type: str, instrument_id: str, horizon: int, result: dict | None, measure: str) -> None:
         if result:
-            records.append((event_type, instrument_id, horizon, result["n"], result["mean"], result["median"],
-                            result["baseline"], result["edge"], result["hit_rate"], result["t_stat"],
-                            result["p_value"], measure, computed_at))
+            records.append({"type": event_type, "instrument_id": instrument_id, "horizon": horizon,
+                            "measure": measure, **result})
 
     for event_type, group in events.groupby("type"):
         if progress:
@@ -94,11 +115,12 @@ def compute_all(progress=None) -> int:
                     sample = _sample(abn[h], instrument_id, dates)
                     add(event_type, instrument_id, h, _stats(sample, abn[h].get(instrument_id, pd.Series(dtype=float))),
                         _measure(instrument_id))
-                    pooled[h].setdefault(asset_class, []).extend(sample.dropna().tolist())
+                    pooled[h].setdefault(asset_class, []).append(sample.dropna())
             for h in HORIZONS:
-                for asset_class, values in pooled[h].items():
+                for asset_class, parts in pooled[h].items():
                     population = abn[h][[c for c in abn[h].columns if c.startswith(f"{asset_class}:")]].stack()
-                    add(event_type, f"pool:{asset_class}", h, _stats(pd.Series(values), population), "vs SPY")
+                    add(event_type, f"pool:{asset_class}", h, _stats(pd.concat(parts), population),
+                        "vs SPY (beta-adj.)")
         else:
             dates = pd.DatetimeIndex(group["date"].drop_duplicates())
             for instrument_id in targets:
@@ -110,12 +132,26 @@ def compute_all(progress=None) -> int:
                     add(event_type, instrument_id, h, _stats(_sample(abn[h], instrument_id, dates), population),
                         _measure(instrument_id))
 
+    # One false-discovery family per tradable horizon: every event type x asset tested at it.
+    # The reaction day (h=0) is descriptive only: it isn't tradable (entry is at its close) and
+    # for events detected from price moves it is significant by construction.
+    for record in records:
+        if record["horizon"] == 0:
+            record["q_value"], record["reliable"] = None, False
+    for h in HORIZONS[1:]:
+        family = [r for r in records if r["horizon"] == h]
+        for record, q in zip(family, benjamini_hochberg([r["p_value"] for r in family])):
+            record["q_value"] = q
+            record["reliable"] = bool(q <= FDR_Q and record["stable"] and record["n"] >= RELIABLE_N)
+
+    columns = ("type", "instrument_id", "horizon", "n", "mean", "median", "baseline", "edge", "hit_rate", "t_stat",
+               "p_value", "q_value", "edge_early", "edge_late", "stable", "reliable", "measure")
+    placeholders = ",".join("?" * (len(columns) + 1))
     with db.session() as conn:
         conn.execute("DELETE FROM event_impact")
         conn.executemany(
-            """INSERT INTO event_impact(type,instrument_id,horizon,n,mean,median,baseline,edge,hit_rate,t_stat,p_value,measure,computed_at)
-               VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)""",
-            records,
+            f"INSERT INTO event_impact({','.join(columns)},computed_at) VALUES({placeholders})",
+            [tuple(int(r[c]) if isinstance(r[c], bool) else r[c] for c in columns) + (computed_at,) for r in records],
         )
     return len(records)
 
@@ -135,18 +171,25 @@ def impact(event_type: str, instrument_id: str) -> dict | None:
     return None
 
 
+PUBLIC_FIELDS = ("n", "mean", "median", "baseline", "edge", "hit_rate", "t_stat", "p_value", "q_value",
+                 "edge_early", "edge_late", "stable", "reliable")
+
+
 def _public(row: dict) -> dict:
-    return {key: row[key] for key in ("n", "mean", "median", "baseline", "edge", "hit_rate", "t_stat", "p_value")}
+    out = {key: row.get(key) for key in PUBLIC_FIELDS}
+    out["stable"], out["reliable"] = bool(out["stable"]), bool(out["reliable"])
+    return out
 
 
-def strongest_for(instrument_id: str, horizon: int = 20, limit: int = 12, min_abs_t: float = 2.0) -> list[dict]:
-    """Event types with the most statistically reliable effect on this asset."""
+def strongest_for(instrument_id: str, horizon: int = 20, limit: int = 12) -> list[dict]:
+    """Event types whose effect on this asset survives the false-discovery and stability checks."""
     rows = db.rows(
-        """SELECT * FROM event_impact WHERE instrument_id=? AND horizon=? AND ABS(t_stat)>=?
-           ORDER BY ABS(t_stat) DESC LIMIT ?""",
-        (instrument_id, horizon, min_abs_t, limit),
+        """SELECT * FROM event_impact WHERE instrument_id=? AND horizon=? AND reliable=1
+           ORDER BY q_value ASC, ABS(t_stat) DESC LIMIT ?""",
+        (instrument_id, horizon, limit),
     )
-    return [{"event_type": row["type"], "label": label(row["type"]), "measure": row["measure"], **_public(row)} for row in rows]
+    return [{"event_type": row["type"], "label": label(row["type"]), "measure": row["measure"], **_public(row)}
+            for row in rows]
 
 
 def occurrences(event_type: str, instrument_id: str, limit: int = 40) -> dict:
@@ -194,10 +237,10 @@ def recent_events(days: int = 10, instrument_id: str | None = None) -> list[dict
 def most_affected(event_type: str, horizon: int = 20, limit: int = 6) -> list[dict]:
     """Assets with the most reliable historical reaction to an event type."""
     rows = db.rows(
-        """SELECT instrument_id, n, edge, hit_rate, t_stat FROM event_impact
-           WHERE type=? AND horizon=? AND n>=? AND instrument_id NOT LIKE 'pool:%'
-           ORDER BY ABS(t_stat) DESC LIMIT ?""",
-        (event_type, horizon, 8, limit),
+        """SELECT instrument_id, n, edge, hit_rate, t_stat, q_value FROM event_impact
+           WHERE type=? AND horizon=? AND reliable=1 AND instrument_id NOT LIKE 'pool:%'
+           ORDER BY q_value ASC, ABS(t_stat) DESC LIMIT ?""",
+        (event_type, horizon, limit),
     )
     for row in rows:
         item = universe.get(row["instrument_id"])

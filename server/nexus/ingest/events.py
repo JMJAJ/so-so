@@ -16,6 +16,7 @@ import pandas as pd
 import yfinance as yf
 
 from .. import data, db, universe
+from . import alfred
 
 SIGMA = 2.5
 COOLDOWN = 10
@@ -132,7 +133,16 @@ def detect_macro_events() -> int:
                                 f"Fed {'hikes' if delta > 0 else 'cuts'} {abs(delta) * 100:.0f}bp to {target[ts]:.2f}%", "FRED"))
 
     def monthly_surprise(series_id: str, up: str, down: str, release_lag_days: int, unit: str, pct: bool) -> None:
-        series = data.macro(series_id)
+        # Preferred: first prints with their real publication dates (ALFRED, needs a FRED key).
+        # Fallback: today's revised series with an estimated release date, flagged approx.
+        vintage = alfred.first_releases(series_id)
+        if vintage is not None and len(vintage) >= 30:
+            series, released_on = vintage["value"], vintage["released"]
+            source, approx, revised = "ALFRED first release", 0, False
+        else:
+            series = data.macro(series_id)
+            released_on = None
+            source, approx, revised = "FRED", 1, True
         if len(series) < 30:
             return
         change = (series.pct_change(fill_method=None) * 100) if pct else series.diff()
@@ -140,13 +150,17 @@ def detect_macro_events() -> int:
         for ts, value in z.dropna().items():
             if abs(value) < 1.0:
                 continue
-            released = _snap(calendar, ts + pd.DateOffset(months=1) + pd.Timedelta(days=release_lag_days))
+            if released_on is not None:
+                released = _snap(calendar, released_on[ts])
+            else:
+                released = _snap(calendar, ts + pd.DateOffset(months=1) + pd.Timedelta(days=release_lag_days))
             if released is None:
                 continue
             kind = up if value > 0 else down
             records.append(_row(kind, None, "macro", released, change[ts], value,
                                 f"{series_id} {ts:%b %Y}: {change[ts]:+.2f}{unit} ({value:+.1f}σ vs trend)",
-                                "FRED", approx=1, meta={"observation": ts.date().isoformat(), "revised_data": True}))
+                                source, approx=approx,
+                                meta={"observation": ts.date().isoformat(), "revised_data": revised}))
 
     monthly_surprise("CPIAUCSL", "inflation_hot", "inflation_cool", 11, "% m/m", True)
     monthly_surprise("PAYEMS", "jobs_strong", "jobs_weak", 4, "k", False)

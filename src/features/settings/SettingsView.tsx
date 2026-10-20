@@ -24,6 +24,7 @@ const SECRET_LABELS: Record<string, string> = {
   openrouter_api_key: "OpenRouter API key",
   nvidia_api_key: "NVIDIA NIM API key (free tier)",
   finnhub_api_key: "Finnhub API key (optional, company news)",
+  fred_api_key: "FRED API key (optional, first-release macro data)",
 };
 
 export default function SettingsView() {
@@ -222,6 +223,17 @@ function SettingsForm() {
               max="3"
               value={values.max_exposure ?? ""}
               onChange={(e) => set("max_exposure", e.target.value)}
+            />
+          </Field>
+          <Field label="Max correlated risk" hint="risk budgets per bet">
+            <input
+              className="terminal-input"
+              type="number"
+              step="0.5"
+              min="1"
+              max="6"
+              value={values.max_correlated_risk ?? ""}
+              onChange={(e) => set("max_correlated_risk", e.target.value)}
             />
           </Field>
           <Field label="Analyst shortlist size">

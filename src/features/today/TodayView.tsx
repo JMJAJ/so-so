@@ -350,7 +350,13 @@ function EventsPanel({ events }: { events: MarketEvent[] }) {
                     <span className={tone(event.impact.mean)}>{pct(event.impact.mean)}</span>, up{" "}
                     {pct(event.impact.hit_rate, 0, false)} of the time
                   </span>
-                  <Reliability t={event.impact.t_stat} n={event.impact.n} />
+                  <Reliability
+                    t={event.impact.t_stat}
+                    n={event.impact.n}
+                    q={event.impact.q_value}
+                    stable={event.impact.stable}
+                    reliable={event.impact.reliable}
+                  />
                 </div>
               )}
               {event.most_affected && event.most_affected.length > 0 && (

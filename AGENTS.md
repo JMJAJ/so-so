@@ -24,14 +24,17 @@ The frontend is TanStack Start (React 19). The backend is a Python FastAPI packa
 | `server/nexus/taxonomy.py` | Event types (with history) and news categories, plus how each category maps to them |
 | `server/nexus/ingest/*` | prices/quotes, FRED macro, event detection, GDELT, headlines |
 | `server/nexus/research/features.py` | Point-in-time technicals and market regime |
-| `server/nexus/research/event_study.py` | Per (event type × asset) forward abnormal returns, edge, hit rate, t-stat |
+| `server/nexus/research/event_study.py` | Per (event type × asset) beta-adjusted forward returns, edge, t-stat, BH q-value, split-half stability, `reliable` flag |
+| `server/nexus/research/probability.py` | Trade probability and expected value from a bracket simulation, reliable evidence and calibration |
+| `server/nexus/research/replay.py` | Point-in-time replay of the evidence engine (`replay_calls`); feeds calibration |
 | `server/nexus/research/analogs.py` | Nearest-neighbour historical states and forward paths |
 | `server/nexus/research/correlation.py` | Peers and lead-lag drivers |
 | `server/nexus/research/signals.py` | Signal panel (shared by backtest and live) and model application |
 | `server/nexus/research/backtest.py` | Walk-forward validation per asset class, with point-in-time signal selection |
 | `server/nexus/agent/{tools,loop,analyst,chat}.py` | Tool registry, provider-neutral tool loop, daily analyst, chat (slash commands) |
+| `server/nexus/agent/factcheck.py` | Checks t/n/% numbers in AI answers against that turn's tool results |
 | `server/nexus/agent/charts.py` | `show_chart` payloads built from stored data; the loop sends them to the UI and only a summary to the model |
-| `server/nexus/paper.py` | Paper broker: sizing, fills, stops/targets/expiry, portfolio |
+| `server/nexus/paper.py` | Paper broker: sizing, fills, stops/targets/expiry, correlated-risk limit, portfolio |
 | `server/nexus/recommendations.py` | Recommendation lifecycle, scoring, track record, lessons |
 | `server/nexus/api.py` | All HTTP routes (chat is SSE) |
 | `server/nexus/cli.py` | `python -m nexus …` |
@@ -52,7 +55,10 @@ npm run typecheck && npm run lint                # frontend checks
   Event dates are the first session the market could react. Tests in
   `server/tests/test_research.py` guard this.
 - **Every claim needs n and a t-stat.** Tools return raw statistics; the UI shows reliability
-  badges. Don't present a signal as an edge unless walk-forward says so.
+  badges. Don't present a signal as an edge unless walk-forward says so. An event effect is
+  evidence only when `reliable` (q ≤ 0.10 after Benjamini–Hochberg, stable across halves, n ≥ 8).
+- **The server owns probabilities.** `propose_recommendation` computes them in
+  `research/probability.py` and rejects calls with EV ≤ 0. Never reintroduce LLM-stated probabilities.
 - **Styling**: Tailwind v4 with the semantic tokens in `src/styles.css` (`bull`, `bear`,
   `primary`, `muted-foreground`), the `terminal-panel` utility, uppercase wide-tracked labels.
   Use the primitives in `src/features/shell/ui.tsx`.

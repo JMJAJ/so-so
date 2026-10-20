@@ -103,16 +103,9 @@ def send(conv_id: str | None, text: str, on_event: Callable[[dict], None] | None
     messages.append(user)
     stored_from = len(messages) - 1
     system = loop.system_prompt(CHAT_EXTRA + "\n\nTrack record so far:\n" + recommendations.lessons())
-    min_prob = config.get_float("min_probability")
-
-    def guard(name: str, payload: dict) -> str | None:
-        if name == "propose_recommendation" and float(payload.get("probability", 0)) < min_prob:
-            return f"probability below the {min_prob:.2f} minimum; do not recommend"
-        return None
-
     try:
         loop.run(llm.create("main"), system, messages, tool_specs=tools.specs(), on_event=on_event,
-                 tool_extra={"_source": "chat"}, guard=guard, effort="medium", max_steps=40)
+                 tool_extra={"_source": "chat"}, effort="medium", max_steps=40)
     except Exception as exc:
         # Drop the half-finished turn (it may end in unanswered tool calls) and record the failure.
         del messages[stored_from + 1:]

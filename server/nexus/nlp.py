@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import re
+import time
 
 from . import db, llm, universe
 from .taxonomy import NEWS_CATEGORIES
@@ -34,9 +35,10 @@ def _parse(text: str) -> list[dict]:
         return []
 
 
-def classify_pending(limit: int = 300, days: int = 3) -> dict:
+def classify_pending(limit: int = 300, days: int = 3, deadline_s: float | None = None) -> dict:
+    started = time.monotonic()
     pending = db.rows(
-        """SELECT id, title, summary, tickers FROM news WHERE classified_at IS NULL
+        """SELECT id, title, summary, tickers FROM news WHERE classified_at IS NULL AND duplicate_of IS NULL
            AND published_at >= datetime('now', ?) ORDER BY published_at DESC LIMIT ?""",
         (f"-{days} days", limit),
     )
@@ -47,6 +49,8 @@ def classify_pending(limit: int = 300, days: int = 3) -> dict:
     hint = _universe_hint()
     classified = 0
     for offset in range(0, len(pending), BATCH):
+        if deadline_s is not None and time.monotonic() - started > deadline_s:
+            break
         batch = pending[offset:offset + BATCH]
         listing = "\n".join(
             f"{i}. {row['title']}" + (f" — {row['summary'][:160]}" if row["summary"] else "")
@@ -90,7 +94,7 @@ def _clamp(value, low: int, high: int) -> int:
 
 def recent(instrument_id: str | None = None, days: int = 7, limit: int = 40, min_magnitude: int = 1,
            category: str | None = None) -> list[dict]:
-    sql = "SELECT * FROM news WHERE published_at >= datetime('now', ?)"
+    sql = "SELECT * FROM news WHERE published_at >= datetime('now', ?) AND duplicate_of IS NULL"
     params: list = [f"-{days} days"]
     if instrument_id:
         sql += " AND (affected LIKE ? OR tickers LIKE ?)"

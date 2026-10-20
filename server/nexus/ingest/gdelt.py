@@ -11,7 +11,7 @@ from __future__ import annotations
 import io
 import time
 import zipfile
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta, timezone
 
 import pandas as pd
 import requests
@@ -110,7 +110,22 @@ DOC_QUERIES = {
 }
 
 
-def fetch_doc_headlines(timespan: str = "1d", max_records: int = 50) -> int:
+def backfill_doc_headlines(days: int = 90, progress=None) -> int:
+    """GDELT DOC headlines one week at a time (the API only reaches back about three months)."""
+    end = datetime.now(timezone.utc)
+    stored = 0
+    for week in range(0, days, 7):
+        if progress:
+            progress(f"gdelt headlines week {week // 7 + 1}/{days // 7}")
+        stored += fetch_doc_headlines(max_records=75, start=end - timedelta(days=week + 7),
+                                      end=end - timedelta(days=week))
+    return stored
+
+
+def fetch_doc_headlines(timespan: str = "1d", max_records: int = 50, start: datetime | None = None,
+                        end: datetime | None = None) -> int:
+    window = ({"startdatetime": start.strftime("%Y%m%d%H%M%S"), "enddatetime": end.strftime("%Y%m%d%H%M%S")}
+              if start and end else {"timespan": timespan})
     stored = 0
     for name, query in DOC_QUERIES.items():
         for attempt in range(2):
@@ -118,7 +133,7 @@ def fetch_doc_headlines(timespan: str = "1d", max_records: int = 50) -> int:
                 response = requests.get(
                     DOC_URL, timeout=30,
                     params={"query": query, "mode": "artlist", "format": "json",
-                            "maxrecords": max_records, "timespan": timespan, "sort": "datedesc"},
+                            "maxrecords": max_records, "sort": "datedesc", **window},
                 )
                 if response.status_code == 429:
                     time.sleep(10)

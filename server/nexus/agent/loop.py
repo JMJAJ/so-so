@@ -7,7 +7,7 @@ from datetime import date
 from typing import Callable
 
 from .. import llm
-from . import tools
+from . import factcheck, tools
 
 PRINCIPLES = f"""You are NEXUS, the research analyst inside a paper-trading terminal. Today is {{today}}.
 Your job is to find what is most worth investing in over the next 1–8 weeks across stocks, ETFs,
@@ -53,6 +53,14 @@ def run(
         reply = provider.complete(system, history, tool_specs,
                                   on_text=lambda chunk: emit({"type": "text", "text": chunk}), effort=effort)
         message = reply.as_message()
+        if not reply.tool_calls and reply.text and new:
+            # Verify the final answer's numbers against this turn's tool data.
+            result = factcheck.check(reply.text, factcheck.tool_blobs(new))
+            addendum = factcheck.note(result)
+            if addendum:
+                message["text"] = reply.text + addendum
+                emit({"type": "text", "text": addendum})
+            emit({"type": "fact_check", **result})
         history.append(message)
         new.append(message)
         if not reply.tool_calls:

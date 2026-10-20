@@ -88,10 +88,25 @@ CREATE TABLE IF NOT EXISTS event_impact (
     n INTEGER NOT NULL,
     mean REAL, median REAL, baseline REAL, edge REAL,
     hit_rate REAL, t_stat REAL, p_value REAL,
+    q_value REAL, edge_early REAL, edge_late REAL, stable INTEGER, reliable INTEGER,
     measure TEXT NOT NULL,
     computed_at TEXT NOT NULL,
     PRIMARY KEY (type, instrument_id, horizon)
 ) WITHOUT ROWID;
+
+-- Point-in-time replay of the evidence policy: what its calls would have done.
+CREATE TABLE IF NOT EXISTS replay_calls (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    date TEXT NOT NULL,
+    instrument_id TEXT NOT NULL,
+    direction TEXT NOT NULL,
+    event_type TEXT NOT NULL,
+    horizon INTEGER NOT NULL,
+    probability REAL NOT NULL,
+    base REAL,
+    realized_return REAL NOT NULL,
+    win INTEGER NOT NULL
+);
 
 CREATE TABLE IF NOT EXISTS signal_stats (
     signal TEXT NOT NULL,
@@ -278,9 +293,27 @@ def session() -> Iterator[sqlite3.Connection]:
         conn.close()
 
 
+# Columns added after a table first shipped: (table, column definition).
+COLUMN_MIGRATIONS = [
+    ("event_impact", "q_value REAL"), ("event_impact", "edge_early REAL"), ("event_impact", "edge_late REAL"),
+    ("event_impact", "stable INTEGER"), ("event_impact", "reliable INTEGER"),
+    ("news", "duplicate_of TEXT"),
+    ("recommendations", "stated_probability REAL"), ("recommendations", "fact_check TEXT"),
+    ("recommendations", "base_probability REAL"), ("replay_calls", "base REAL"),
+]
+
+
+def _migrate(conn: sqlite3.Connection) -> None:
+    for table, definition in COLUMN_MIGRATIONS:
+        columns = {row["name"] for row in conn.execute(f"PRAGMA table_info({table})")}
+        if definition.split()[0] not in columns:
+            conn.execute(f"ALTER TABLE {table} ADD COLUMN {definition}")
+
+
 def init_db() -> None:
     with session() as conn:
         conn.executescript(SCHEMA)
+        _migrate(conn)
         conn.execute(
             "INSERT OR IGNORE INTO schema_meta(version, applied_at) VALUES(?, ?)",
             (SCHEMA_VERSION, now_iso()),

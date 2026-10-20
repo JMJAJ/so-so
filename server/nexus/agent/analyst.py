@@ -14,8 +14,9 @@ from . import loop, tools
 _lock = threading.Lock()
 
 TASK = """Daily research run. Investigate the shortlist below (you may also scan for others), then
-record your best ideas with propose_recommendation — at most {max_recs} new ones, each with
-probability ≥ {min_prob:.2f}. Zero is a fine answer when nothing has real evidence. Skip instruments
+record your best ideas with propose_recommendation — at most {max_recs} new ones. The server computes
+each call's probability from the data and rejects anything below {min_prob:.0%}; a rejection is an
+answer, not an error to work around. Zero is a fine answer when nothing has real evidence. Skip instruments
 that already have an open recommendation. Prefer ideas where several independent kinds of
 evidence agree (event history, analogs, quant model, lead-lag drivers, news).
 
@@ -63,8 +64,6 @@ def run(*, max_recs: int | None = None, focus: str | None = None, on_event=None)
                 return None
             if created() >= max_recs:
                 return f"limit of {max_recs} new recommendations reached for this run"
-            if float(payload.get("probability", 0)) < min_prob:
-                return f"probability below the {min_prob:.2f} minimum; do not recommend"
             return None
 
         new = loop.run(llm.create("main"), system, history, tool_specs=tools.specs(), on_event=on_event,

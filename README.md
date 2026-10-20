@@ -33,6 +33,22 @@ pairs and commodity futures.
 - **Honesty built in.** Every number carries `n`, hit rate, edge vs. normal and a t-stat. The quant
   model is validated walk-forward per asset class. If it has no out-of-sample edge, its forecast
   falls back to the base rate and the AI is told so.
+- **Guarding against luck.** Event effects are measured against a beta-adjusted benchmark
+  (market model, trailing-year beta). With thousands of (event × asset) tests, an effect only
+  counts as *reliable* if it survives a Benjamini–Hochberg false-discovery correction (q ≤ 0.10)
+  and both halves of its history agree in sign.
+- **Probabilities come from data, not the LLM.** For each proposed trade the server simulates the
+  same stop and target from every past entry day (single stocks have their survivor drift
+  removed). It adjusts that base rate only for reliable evidence, shrinks the adjustment by how
+  well evidence predicted outcomes before, and records the call only if its expected value is
+  positive. The AI's own number is kept for comparison.
+- **A track record without waiting.** A point-in-time replay runs the evidence engine on past dates
+  using only what was known then. Until 20 live calls have closed, its calibration sets how much
+  evidence is trusted.
+- **Checks on the AI.** Every t-stat, `n` and percentage the AI quotes is looked up in the tool
+  results it actually received, and anything unsupported is flagged under the answer.
+- **Portfolio risk.** A new position whose returns move with existing ones (60-day correlation,
+  adjusted for long/short) counts as the same bet. It's refused above two risk budgets per bet.
 - **Verification.** Recommendations are scored on their own path (stop, target or horizon) against
   a benchmark. The Track Record page shows calibration (stated probability vs. realized) and what
   kinds of evidence actually made money.
@@ -108,6 +124,8 @@ python -m nexus recs --status all
 python -m nexus why rec_ab12cd34ef
 python -m nexus report               # is the AI actually right?
 python -m nexus backtest --run       # recompute walk-forward validation
+python -m nexus replay --run         # point-in-time replay of the evidence engine + calibration
+python -m nexus news-backfill        # ~1y Finnhub company news + 3 months GDELT, deduped, classified
 ```
 
 ## Schedule (UTC, in-process)
@@ -118,17 +136,20 @@ python -m nexus backtest --run       # recompute walk-forward validation
 | news fetch + LLM classification | every 30 min |
 | daily data, scoring, forecasts | 21:45 daily |
 | AI analyst run | 22:30 Mon–Fri |
-| earnings, event studies, backtest | Saturday 06:00 |
+| earnings, event studies, backtest, replay | Saturday 06:00 |
 | GDELT history backfill | every 2 h until complete |
 
 ## Limits worth knowing
 
 - Prices are delayed yfinance data. Paper fills add slippage, and orders placed while a market is
   closed fill at the next open.
-- CPI and payroll surprises use revised FRED data and approximate release dates. They're flagged
-  `approx_date` in the database.
-- Event-study t-stats use overlapping windows and are optimistic; treat |t| < 2 as noise. The
-  walk-forward backtest uses non-overlapping samples.
+- CPI and payroll surprises use first-release values and exact release dates from ALFRED when a
+  (free) FRED API key is set in Settings. Without one they fall back to revised FRED data with
+  approximate dates, flagged `approx_date`.
+- Event-study t-stats use overlapping windows and are optimistic, which is why only FDR-corrected,
+  split-half-stable effects count as reliable. The walk-forward backtest uses non-overlapping samples.
+- The universe is today's large caps, so stock history is survivor-biased. Probabilities remove each
+  stock's excess drift over the S&P 500; event studies are relative to a benchmark, which limits it.
 - This is a research tool with paper money. It is not investment advice.
 
 See `AGENTS.md` for the code layout.

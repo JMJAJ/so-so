@@ -18,7 +18,7 @@ from pydantic import BaseModel
 from . import config, data, db, jobs, llm, nlp, paper, recommendations, universe
 from .agent import analyst, chat, tools
 from .ingest import prices
-from .research import analogs, backtest, correlation, event_study, scan
+from .research import analogs, backtest, correlation, event_study, probability, replay, scan
 from .research.features import asset_features, regime_frame, regime_label
 from .taxonomy import EVENT_TYPES, NEWS_CATEGORIES, label
 
@@ -321,7 +321,9 @@ def close_position(position_id: str):
 
 @app.get("/api/track-record")
 def track_record():
-    return clean({**recommendations.track_record(), "lessons": recommendations.lessons()})
+    k, basis = probability.calibration_factor()
+    return clean({**recommendations.track_record(), "lessons": recommendations.lessons(),
+                  "replay": replay.summary(), "probability_calibration": {"k": k, "basis": basis}})
 
 
 @app.get("/api/models")

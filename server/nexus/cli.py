@@ -13,6 +13,8 @@ import sys
 from . import db
 
 
+JOB_ALIASES = {"update": "daily", "news-backfill": "news_backfill"}
+
 def _print_json(value) -> None:
     from .api import clean
 
@@ -61,8 +63,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--json", action="store_true", help="machine-readable output")
     sub = parser.add_subparsers(dest="command", required=True)
     sub.add_parser("init", help="download history and build all research (first run, ~10-20 min)")
-    for name in ("update", "news", "research", "monitor"):
-        sub.add_parser(name, help=f"run the '{name if name != 'update' else 'daily'}' job now")
+    for name in ("update", "news", "news-backfill", "research", "monitor"):
+        sub.add_parser(name, help=f"run the '{JOB_ALIASES.get(name, name)}' job now")
     p = sub.add_parser("scan", help="rank the universe by today's forecast/evidence")
     p.add_argument("--class", dest="asset_class")
     p.add_argument("--direction", default="both", choices=["long", "short", "both"])
@@ -87,6 +89,8 @@ def main(argv: list[str] | None = None) -> int:
     sub.add_parser("report", help="track record: is the AI actually right?")
     p = sub.add_parser("backtest", help="walk-forward validation results (use --run to recompute)")
     p.add_argument("--run", action="store_true")
+    p = sub.add_parser("replay", help="point-in-time replay of the evidence engine (use --run to recompute)")
+    p.add_argument("--run", action="store_true")
     sub.add_parser("regime", help="current macro regime")
     sub.add_parser("jobs", help="job status")
     p = sub.add_parser("serve", help="start the API server")
@@ -96,10 +100,10 @@ def main(argv: list[str] | None = None) -> int:
     db.init_db()
     cmd = args.command
 
-    if cmd in ("init", "update", "news", "research", "monitor"):
+    if cmd in ("init", "update", "news", "news-backfill", "research", "monitor"):
         from . import jobs
 
-        name = {"update": "daily"}.get(cmd, cmd)
+        name = JOB_ALIASES.get(cmd, cmd)
         result = jobs.run(name, progress=_progress)
         _print_json(result)
         return 0
@@ -234,6 +238,26 @@ def main(argv: list[str] | None = None) -> int:
                       f"top-bottom quintile {_pct(wf.get('long_short'))}  {row.get('reason') or ''}")
                 for name, stats in (row.get("signals") or {}).items():
                     print(f"   {name:<9} IC {stats['ic']:+.3f}  t={stats['t_stat']:+.1f}  n={stats['n']}")
+        return 0
+
+    if cmd == "replay":
+        from .research import probability, replay
+
+        result = replay.run(progress=_progress) if args.run else replay.summary()
+        if args.json:
+            _print_json(result)
+        elif not result.get("calls"):
+            print("No replay yet. Run: python -m nexus replay --run")
+        else:
+            print(f"{result['calls']} calls {result['period'][0]}..{result['period'][1]}: hit rate {result['hit_rate']:.0%}, "
+                  f"avg {_pct(result['avg_return'])} (t={result['t_stat']:.1f}), stated p {result['avg_probability']:.0%}, "
+                  f"Brier {result['brier']:.3f}")
+            for b in result["calibration"]:
+                print(f"   p {b['bucket']}: n={b['n']:<4} stated {b['stated']:.0%}  realized {b['realized']:.0%}")
+            for row in result["by_event_type"][:12]:
+                print(f"   {row['event_type']:<22} n={row['n']:<4} hit {row['hit_rate']:.0%}  avg {_pct(row['avg_return'])}")
+            k, basis = probability.calibration_factor()
+            print(f"calibration k={k:.2f} ({basis})")
         return 0
 
     if cmd == "jobs":

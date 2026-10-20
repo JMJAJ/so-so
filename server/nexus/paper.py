@@ -4,6 +4,11 @@ Fills use the latest delayed quote plus slippage. Orders placed while a market i
 closed (or the quote is stale) wait as `pending` and fill at the first fresh quote
 after the open. Stops/targets are checked against live quotes and against daily
 bar highs/lows (a gap through a stop fills at the bar's open, not the stop).
+
+Correlated risk: each position risks about one risk budget. Before opening, positions
+whose 60-day daily returns move with the new one (correlation adjusted for long/short)
+count as part of the same bet; the order is refused when that bet would exceed
+`max_correlated_risk` budgets (default 2: the new trade plus one equivalent).
 """
 
 from __future__ import annotations
@@ -11,12 +16,16 @@ from __future__ import annotations
 import uuid
 from datetime import datetime, timedelta, timezone
 
-from . import config, db, universe
+import numpy as np
+
+from . import config, data, db, universe
 from .ingest import prices
 
 SLIPPAGE_BPS = {"stock": 2.0, "etf": 1.0, "crypto": 10.0, "forex": 1.0, "commodity": 3.0}
 FEE_BPS = {"stock": 0.0, "etf": 0.0, "crypto": 10.0, "forex": 0.0, "commodity": 1.0}
 MAX_POSITION_PCT = 0.25
+CORRELATION_DAYS = 60
+SAME_BET_RHO = 0.5
 
 
 def _usd_per_unit_move(item: universe.Instrument, price: float) -> float:
@@ -70,6 +79,34 @@ def size_for(item: universe.Instrument, entry: float, stop: float, equity: float
     return quantity
 
 
+def correlated_risk(instrument_id: str, side: str) -> dict:
+    """How much of the book is already the same bet as a new `side` position in `instrument_id`.
+    rho is the side-adjusted correlation of daily returns: +1 means the two positions win and
+    lose together. Risk units = 1 (the new trade) + the sum of rho over same-bet positions."""
+    held = db.rows("SELECT instrument_id, side FROM positions WHERE instrument_id != ?", (instrument_id,))
+    if not held:
+        return {"units": 1.0, "same_bet": []}
+    closes = data.closes()
+    ids = [instrument_id] + [h["instrument_id"] for h in held]
+    if closes.empty or instrument_id not in closes:
+        return {"units": 1.0, "same_bet": []}
+    returns = np.log(closes.reindex(columns=ids).tail(CORRELATION_DAYS + 1)).diff().iloc[1:]
+    sign = 1 if side == "long" else -1
+    same_bet = []
+    for h in held:
+        column = h["instrument_id"]
+        pair = returns[[instrument_id, column]].dropna() if column in returns else None
+        if pair is None or len(pair) < CORRELATION_DAYS // 2:
+            continue
+        rho = float(pair.corr().iloc[0, 1]) * sign * (1 if h["side"] == "long" else -1)
+        if rho >= SAME_BET_RHO:
+            item = universe.get(column)
+            same_bet.append({"instrument_id": column, "symbol": item.symbol if item else column, "side": h["side"],
+                             "rho": round(rho, 2)})
+    same_bet.sort(key=lambda r: -r["rho"])
+    return {"units": round(1.0 + sum(r["rho"] for r in same_bet), 2), "same_bet": same_bet}
+
+
 def open_position(instrument_id: str, side: str, *, stop: float, target: float | None, expires_at: str | None,
                   recommendation_id: str | None = None, source: str = "manual", quantity: float | None = None) -> dict:
     item = universe.require(instrument_id)
@@ -81,6 +118,12 @@ def open_position(instrument_id: str, side: str, *, stop: float, target: float |
         raise ValueError("Position limit reached")
     if db.one("SELECT 1 FROM positions WHERE instrument_id=?", (item.id,)):
         raise ValueError(f"Already holding {item.symbol}")
+    risk = correlated_risk(item.id, side)
+    limit = config.get_float("max_correlated_risk")
+    if risk["units"] > limit:
+        bets = ", ".join(f"{r['symbol']} {r['side']} (rho {r['rho']:.2f})" for r in risk["same_bet"])
+        raise ValueError(f"Correlated risk limit: {side} {item.symbol} is the same bet as {bets}; together "
+                         f"{risk['units']:.1f} risk budgets, limit {limit:g}")
     quote = prices.quote(item.id)
     reference = quote["price"] if quote and quote["price"] else None
     if reference is None:

@@ -17,7 +17,7 @@ import {
 } from "@/features/shell/ui";
 import { api } from "@/lib/api";
 import { humanize, num, pct, tone } from "@/lib/format";
-import type { ModelSummary, RecordStats } from "@/lib/types";
+import type { ModelSummary, RecordStats, TrackRecord } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
 export default function TrackRecordView() {
@@ -108,6 +108,8 @@ export default function TrackRecordView() {
         </Panel>
       </div>
 
+      <ReplayPanel record={data} />
+
       <Panel
         title="Quant model validation"
         subtitle="Walk-forward, out-of-sample: each year is predicted by a model fit only on earlier data, with signals chosen by their own past significance. IC = rank correlation between forecast and the realized 20-session return."
@@ -129,6 +131,73 @@ export default function TrackRecordView() {
         )}
       </Panel>
     </div>
+  );
+}
+
+function ReplayPanel({ record }: { record: TrackRecord }) {
+  const replay = record.replay;
+  const cal = record.probability_calibration;
+  return (
+    <Panel
+      title="Point-in-time replay"
+      subtitle="The evidence engine run on past dates using only what was known then: event history whose outcomes had already played out, a 2×ATR stop and 3×ATR target. It tests the evidence, not the AI's judgement, and sets how much new probabilities are trusted."
+    >
+      {!replay || !replay.calls ? (
+        <Empty title="No replay yet">Runs with the weekly research job.</Empty>
+      ) : (
+        <div className="space-y-4">
+          <div className="grid grid-cols-2 gap-3 md:grid-cols-5">
+            <Stat
+              label="Calls"
+              value={String(replay.calls)}
+              hint={replay.period ? `${replay.period[0]} → ${replay.period[1]}` : ""}
+            />
+            <Stat
+              label="Hit rate"
+              value={pct(replay.hit_rate ?? null, 0, false)}
+              hint={`stated avg ${pct(replay.avg_probability ?? null, 0, false)}`}
+            />
+            <Stat
+              label="Avg return"
+              value={pct(replay.avg_return ?? null)}
+              hint={replay.t_stat != null ? `t = ${num(replay.t_stat, 1)}` : ""}
+            />
+            <Stat label="Brier" value={num(replay.brier ?? null, 3)} hint="0.25 = coin flip" />
+            <Stat
+              label="Evidence trust k"
+              value={cal ? num(cal.k, 2) : "—"}
+              hint="0 = ignore evidence, 1 = take it at face value"
+            />
+          </div>
+          {cal && <p className="text-[11px] text-muted-foreground">{cal.basis}</p>}
+          <div className="grid gap-4 lg:grid-cols-[minmax(0,320px)_minmax(0,1fr)]">
+            {replay.calibration?.length ? <CalibrationChart rows={replay.calibration} /> : <span />}
+            <TableWrap>
+              <thead>
+                <tr>
+                  <Th>Event</Th>
+                  <Th right>Calls</Th>
+                  <Th right>Hit rate</Th>
+                  <Th right>Avg return</Th>
+                </tr>
+              </thead>
+              <tbody>
+                {(replay.by_event_type ?? []).map((row) => (
+                  <tr key={row.event_type}>
+                    <Td>{humanize(row.event_type)}</Td>
+                    <Td right>{row.n}</Td>
+                    <Td right>{pct(row.hit_rate, 0, false)}</Td>
+                    <Td right className={tone(row.avg_return)}>
+                      {pct(row.avg_return)}
+                    </Td>
+                  </tr>
+                ))}
+              </tbody>
+            </TableWrap>
+          </div>
+        </div>
+      )}
+    </Panel>
   );
 }
 

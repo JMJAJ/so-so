@@ -9,9 +9,9 @@ from typing import Callable
 import numpy as np
 import pandas as pd
 
-from .. import data, db, nlp, paper, recommendations, universe
+from .. import config, data, db, nlp, paper, recommendations, universe
 from ..ingest import prices
-from ..research import analogs, backtest, correlation, event_study, scan
+from ..research import analogs, backtest, correlation, event_study, probability, replay, scan
 from ..research.features import asset_features, regime_frame, regime_label
 from ..taxonomy import EVENT_TYPES, NEWS_CATEGORIES
 
@@ -91,8 +91,10 @@ def event_study_tool(event_type: str, instrument: str) -> dict:
     impact = event_study.impact(event_type, item.id)
     detail = event_study.occurrences(event_type, item.id, limit=15)
     return _r({
-        "how_to_read": "horizons are sessions after the reaction day close; 0 = reaction day itself. edge = mean minus "
-                       "the asset's normal return over the same period; |t| < 2 is noise; hit_rate = share of positive outcomes.",
+        "how_to_read": "horizons are sessions after the reaction day close; 0 = reaction day itself. Returns are "
+                       "beta-adjusted vs the benchmark. edge = mean minus the asset's normal return. Only rows with "
+                       "reliable=true survived the false-discovery correction (q_value <= 0.10) and point the same "
+                       "way in the older and newer half of history (edge_early, edge_late); the rest is noise.",
         "impact": impact or "fewer than 5 occurrences with data: no reliable history",
         "occurrences": detail.get("rows", []),
     })
@@ -108,7 +110,7 @@ def event_effects(instrument: str, horizon: int = 20) -> dict:
                        "history": h, "pooled": impact["pooled"] if impact else None})
     return _r({
         "active_events_last_10d": active,
-        "most_reliable_event_effects": event_study.strongest_for(item.id, int(horizon), limit=10, min_abs_t=2.0),
+        "most_reliable_event_effects": event_study.strongest_for(item.id, int(horizon), limit=10),
     })
 
 
@@ -153,8 +155,10 @@ def portfolio_tool() -> dict:
 
 def track_record_tool() -> dict:
     record = recommendations.track_record()
+    k, basis = probability.calibration_factor()
     return _r({"summary": recommendations.lessons(), "overall": record["overall"], "calibration": record["calibration"],
-               "by_evidence": record["by_evidence"], "by_asset_class": record["by_asset_class"]})
+               "by_evidence": record["by_evidence"], "by_asset_class": record["by_asset_class"],
+               "replay": replay.summary(), "probability_calibration": {"k": k, "basis": basis}})
 
 
 def model_validation(asset_class: str | None = None) -> dict:
@@ -173,37 +177,6 @@ def list_recommendations(status: str = "open") -> dict:
                      for r in recommendations.list_recs(status if status != "all" else None, 50)]}
 
 
-WEAK_EVIDENCE_CAP = 0.58
-STRONG_EVIDENCE_CAP = 0.70
-
-
-def _strongest_active_event(instrument_id: str, horizon_days: int) -> dict | None:
-    """The most reliable (largest |t|, n >= 8) historical effect among events of the last 10 days,
-    at the measured horizon closest to the call's horizon."""
-    horizon = min(event_study.HORIZONS[1:], key=lambda h: abs(h - horizon_days))
-    best = None
-    for event in event_study.recent_events(10, instrument_id):
-        impact = event_study.impact(event["type"], instrument_id)
-        stats = impact["horizons"].get(horizon) if impact else None
-        if stats and stats["n"] >= 8 and (best is None or abs(stats["t_stat"]) > abs(best["t_stat"])):
-            best = {"type": event["type"], "horizon": horizon, **stats}
-    return best
-
-
-def _evidence_cap(item: universe.Instrument, horizon_days: int, snapshot: dict | None) -> tuple[float, str]:
-    """Server-side check of evidence strength; the model's own quoted t-stats aren't trusted."""
-    if snapshot and snapshot.get("model_has_edge"):
-        return STRONG_EVIDENCE_CAP, f"the {item.asset_class} quant model has a validated walk-forward edge"
-    event = _strongest_active_event(item.id, horizon_days)
-    if event and abs(event["t_stat"]) >= 2:
-        return STRONG_EVIDENCE_CAP, (f"active {event['type']} has a reliable {event['horizon']}d history "
-                                     f"(t={event['t_stat']:.1f}, n={event['n']})")
-    reason = f"no validated model edge for {item.asset_class}s and no event from the last 10 days with |t| >= 2"
-    if event:
-        reason += f" (best: {event['type']}, t={event['t_stat']:.1f}, n={event['n']})"
-    return WEAK_EVIDENCE_CAP, reason
-
-
 def _position_status(rec: dict) -> str:
     if not rec.get("position_id"):
         if rec.get("trade_note"):
@@ -220,32 +193,53 @@ def _position_status(rec: dict) -> str:
             f"{position['entry_price']:.4g}.")
 
 
+def _confidence(prob: dict) -> str:
+    if prob["has_evidence"] and prob["probability"] >= 0.62:
+        return "high"
+    if prob["has_evidence"]:
+        return "medium"
+    return "low"
+
+
 def propose_recommendation(**payload) -> dict:
     source = payload.pop("_source", "chat")
     run_id = payload.pop("_run_id", None)
     item = _inst(payload.get("instrument_id", ""))
     snapshot = next((row for row in scan.forecasts() if row["instrument_id"] == item.id), None)
-    stated = float(payload.get("probability", 0.5))
-    cap, reason = _evidence_cap(item, int(payload.get("horizon_days") or 20), snapshot)
-    calibration_note = None
-    if stated > cap:
-        calibration_note = f"Probability capped from {stated:.2f} to {cap:.2f}: {reason}."
-        payload["probability"] = cap
-        payload["evidence"] = [*(payload.get("evidence") or []),
-                               {"type": "calibration", "summary": calibration_note}]
-        if cap == WEAK_EVIDENCE_CAP:
-            payload["confidence"] = "low"
+    direction = str(payload.get("direction", "")).lower()
+    horizon = int(payload.get("horizon_days") or 20)
+    stated = payload.get("probability")
+    quote = prices.quote(item.id)
+    price = quote["price"] if quote and quote["price"] else None
+    if not price:
+        raise ValueError(f"No price for {item.symbol}")
+    stop_pct = abs(float(payload["stop"]) / price - 1)
+    target_pct = abs(float(payload["target"]) / price - 1)
+    # The probability and expected value come from the data; the model's number is kept for comparison.
+    prob = probability.evidence_probability(item.id, direction, horizon, stop_pct, target_pct, snapshot)
+    minimum = config.get_float("min_probability")
+    if prob["expected_return"] <= 0 or prob["probability"] < minimum:
+        reason = "negative expected value" if prob["expected_return"] <= 0 else f"below the {minimum:.0%} minimum"
+        raise ValueError(f"Not recorded ({reason}): {prob['explanation']}. Try a different bracket only if the "
+                         "evidence supports it; otherwise say there is no trade.")
+    payload["probability"] = prob["probability"]
+    payload["expected_return"] = prob["expected_return"]
+    payload["base_probability"] = prob["base"]
+    payload["stated_probability"] = float(stated) if stated is not None else None
+    payload["confidence"] = _confidence(prob)
+    payload["evidence"] = [*(payload.get("evidence") or []),
+                           {"type": "calibration", "summary": prob["explanation"]}]
     rec = recommendations.create({**payload, "instrument_id": item.id}, source=source, run_id=run_id,
                                  signal_snapshot=snapshot)
-    status = _position_status(rec)
     result = {
-        "paper_position": status,
+        "paper_position": _position_status(rec),
         "recorded": {k: rec.get(k) for k in ("id", "symbol", "direction", "entry_price", "stop", "target",
                                              "probability", "confidence")},
-        "instruction": "Report the paper_position line to the user exactly as stated.",
+        "probability": {"computed": prob["probability"], "you_stated": stated, "how": prob["explanation"],
+                        "components": prob["components"]},
+        "instruction": "Report the paper_position line exactly as stated, and quote the computed probability, "
+                       "not your own.",
     }
-    if calibration_note:
-        result["calibration"] = calibration_note
     return result
 
 
@@ -318,7 +312,7 @@ TOOLS: dict[str, dict] = {
     },
     "track_record": {
         "fn": track_record_tool,
-        "description": "How past recommendations actually performed: hit rate, returns, calibration, broken down by evidence type and asset class.",
+        "description": "How past recommendations actually performed: hit rate, returns, calibration, broken down by evidence type and asset class. Also the point-in-time replay (the evidence engine run on past dates with only the data known then) and the calibration factor k it implies for new probabilities.",
         "parameters": {"type": "object", "properties": {}},
     },
     "model_validation": {
@@ -353,8 +347,9 @@ TOOLS: dict[str, dict] = {
     "propose_recommendation": {
         "fn": propose_recommendation,
         "description": ("Record a recommendation (and, if autopilot is on, open a paper position sized by the risk budget). "
-                        "Only call when the evidence supports it. The server caps probability at 0.58 when there is no "
-                        "validated model edge and no event from the last 10 days with |t| >= 2 (0.70 otherwise). The "
+                        "Only call when the evidence supports it. The server computes the probability from data "
+                        "(base rate + reliable event effects + validated model, calibrated on past outcomes) and "
+                        "rejects calls below the minimum; your own probability is stored only for comparison. The "
                         "result's paper_position line says whether a position OPENED, is PENDING or was NOT OPENED."),
         "parameters": {"type": "object", "properties": {
             "instrument_id": _INSTR,
@@ -362,7 +357,7 @@ TOOLS: dict[str, dict] = {
             "horizon_days": {"type": "integer", "minimum": 5, "maximum": 40, "description": "Trading sessions to hold"},
             "stop": {"type": "number", "description": "Invalidation price (below current for long, above for short)"},
             "target": {"type": "number", "description": "Take-profit price"},
-            "probability": {"type": "number", "minimum": 0.5, "maximum": 0.95, "description": "Calibrated probability the trade is profitable at exit"},
+            "probability": {"type": "number", "minimum": 0.3, "maximum": 0.95, "description": "Your own estimate; the server replaces it with a data-derived one"},
             "expected_return": {"type": "number", "description": "Expected return as a fraction, e.g. 0.03"},
             "confidence": {"type": "string", "enum": ["low", "medium", "high"]},
             "thesis": {"type": "string", "description": "2-5 sentences: why, citing the numbers"},
@@ -372,7 +367,7 @@ TOOLS: dict[str, dict] = {
                 "summary": {"type": "string", "description": "e.g. 'After rate_cut, GLD 20d +4.1% vs normal, 82% hit, t=2.1, n=11'"},
                 "n": {"type": "integer"}, "stat": {"type": "number"}}, "required": ["type", "summary"]}},
             "invalidation": {"type": "string", "description": "What would prove the thesis wrong"}},
-            "required": ["instrument_id", "direction", "horizon_days", "stop", "target", "probability", "confidence", "thesis", "evidence"]},
+            "required": ["instrument_id", "direction", "horizon_days", "stop", "target", "thesis", "evidence"]},
     },
 }
 

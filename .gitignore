@@ -41,3 +41,4 @@ server/data/.secret
 # Local secrets
 .env
 server/.env
+.claude/

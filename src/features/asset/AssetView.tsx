@@ -407,7 +407,13 @@ function EventPanel({ data }: { data: AssetDetail }) {
                         ), up {pct(event.history.hit_rate, 0, false)}, n={event.history.n}
                         {event.pooled ? " · pooled across asset class" : ""}
                       </span>
-                      <Reliability t={event.history.t_stat} n={event.history.n} />
+                      <Reliability
+                        t={event.history.t_stat}
+                        n={event.history.n}
+                        q={event.history.q_value}
+                        stable={event.history.stable}
+                        reliable={event.history.reliable}
+                      />
                     </div>
                   ) : (
                     <div className="mt-1 text-[10px] text-muted-foreground">

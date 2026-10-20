@@ -10,6 +10,7 @@ from nexus.agent import analyst, chat, tools
 from nexus.llm import Reply
 from nexus.llm.anthropic_provider import AnthropicProvider
 from nexus.llm.openai_compat import OpenAICompatProvider
+from nexus.research import probability
 
 
 class ScriptedProvider:
@@ -44,6 +45,21 @@ def _proposal(instrument_id: str) -> dict:
     }
 
 
+def _computed(p: float, ev: float, evidence: bool = False):
+    def fake(instrument_id, direction, horizon_days, stop_pct, target_pct, snapshot=None):
+        return {"probability": p, "base": 0.5, "raw": p, "expected_return": ev, "avg_win": target_pct,
+                "avg_loss": stop_pct, "horizon": 20, "has_evidence": evidence,
+                "components": [{"source": "bracket base rate (test)", "p": 0.5}],
+                "calibration": {"k": 1.0, "basis": "test"}, "explanation": f"test bracket won {p:.0%}"}
+    return fake
+
+
+@pytest.fixture()
+def favourable(monkeypatch):
+    """The synthetic random walks have no edge, so stub the probability engine for plumbing tests."""
+    monkeypatch.setattr(probability, "evidence_probability", _computed(0.58, 0.01))
+
+
 def test_every_tool_runs_on_real_data(synthetic):
     calls = {
         "scan_universe": {}, "asset_snapshot": {"instrument": "AAPL"}, "recent_news": {},
@@ -59,7 +75,7 @@ def test_every_tool_runs_on_real_data(synthetic):
     assert is_error and "Unknown instrument" in text
 
 
-def test_chat_runs_tools_and_records_recommendation(synthetic, monkeypatch):
+def test_chat_runs_tools_and_records_recommendation(synthetic, favourable, monkeypatch):
     provider = ScriptedProvider([
         Reply(text="Checking.", tool_calls=[{"id": "t1", "name": "asset_snapshot", "input": {"instrument": "NVDA"}}]),
         Reply(text="", tool_calls=[{"id": "t2", "name": "propose_recommendation", "input": _proposal("stock:nvda")}]),
@@ -95,10 +111,12 @@ def test_chat_failure_leaves_replayable_history(synthetic, monkeypatch):
 
 
 def test_analyst_enforces_limits(synthetic, monkeypatch):
-    weak = dict(_proposal("stock:aapl"), probability=0.51)
+    good = _computed(0.58, 0.01)
+    monkeypatch.setattr(probability, "evidence_probability",
+                        lambda iid, *a, **k: _computed(0.45, -0.002)(iid, *a, **k) if iid == "stock:aapl" else good(iid, *a, **k))
     provider = ScriptedProvider([
         Reply(text="", tool_calls=[
-            {"id": "a", "name": "propose_recommendation", "input": weak},
+            {"id": "a", "name": "propose_recommendation", "input": _proposal("stock:aapl")},
             {"id": "b", "name": "propose_recommendation", "input": _proposal("stock:msft")},
             {"id": "c", "name": "propose_recommendation", "input": _proposal("stock:jpm")},
         ]),
@@ -108,7 +126,7 @@ def test_analyst_enforces_limits(synthetic, monkeypatch):
     result = analyst.run(max_recs=1)
     assert result["recommendations"] == 1
     tool_results = provider.calls[1]["messages"][-1]["results"]
-    assert "minimum" in tool_results[0]["content"] and tool_results[0]["is_error"]
+    assert "Not recorded (negative expected value)" in tool_results[0]["content"] and tool_results[0]["is_error"]
     assert not tool_results[1]["is_error"]
     assert "limit" in tool_results[2]["content"]
     run = db.one("SELECT * FROM runs")
@@ -211,32 +229,30 @@ def test_invest_command_expands_with_limits(nexus_db):
     assert "focus: energy" in text and "propose_recommendation" in text and "show_chart" in text
 
 
-def test_propose_reports_position_and_caps_weak_probability(synthetic):
+def test_propose_records_computed_probability_not_stated(synthetic, favourable):
     confident = dict(_proposal("stock:aapl"), probability=0.72, confidence="high")
     text, is_error = tools.call("propose_recommendation", confident, extra={"_source": "chat"})
     assert not is_error, text
     result = json.loads(text)
     assert result["paper_position"].startswith("OPENED:")
-    assert result["recorded"]["probability"] == pytest.approx(tools.WEAK_EVIDENCE_CAP)
-    assert result["recorded"]["confidence"] == "low"
-    assert "capped from 0.72" in result["calibration"]
-    rec = db.one("SELECT evidence FROM recommendations WHERE instrument_id='stock:aapl'")
+    assert result["recorded"]["probability"] == pytest.approx(0.58)
+    assert result["probability"]["you_stated"] == 0.72
+    rec = db.one("SELECT probability, stated_probability, base_probability, evidence FROM recommendations")
+    assert rec["stated_probability"] == 0.72 and rec["base_probability"] == 0.5
     assert "calibration" in rec["evidence"]
 
 
-def test_propose_says_not_opened_when_limits_block(synthetic):
+def test_propose_rejects_negative_expected_value(synthetic):
+    # On a driftless random walk this bracket has no edge, so the real engine refuses it.
+    text, is_error = tools.call("propose_recommendation", _proposal("stock:msft"), extra={"_source": "chat"})
+    assert is_error and "Not recorded" in text
+    assert db.one("SELECT COUNT(*) c FROM recommendations")["c"] == 0
+
+
+def test_propose_says_not_opened_when_limits_block(synthetic, favourable):
     db.execute("INSERT OR REPLACE INTO settings(key,value) VALUES('max_exposure','0.01')")
     text, is_error = tools.call("propose_recommendation", _proposal("stock:msft"), extra={"_source": "chat"})
     assert not is_error, text
     result = json.loads(text)
     assert result["paper_position"].startswith("NOT OPENED:") and "exposure" in result["paper_position"]
     assert db.one("SELECT COUNT(*) c FROM recommendations")["c"] == 1
-
-
-def test_strong_event_history_allows_higher_probability(synthetic, monkeypatch):
-    monkeypatch.setattr(tools, "_strongest_active_event",
-                        lambda instrument_id, horizon: {"type": "rate_cut", "horizon": 20, "t_stat": 3.1, "n": 11})
-    result = json.loads(tools.call("propose_recommendation", dict(_proposal("stock:jpm"), probability=0.66),
-                                   extra={"_source": "chat"})[0])
-    assert result["recorded"]["probability"] == pytest.approx(0.66)
-    assert "calibration" not in result

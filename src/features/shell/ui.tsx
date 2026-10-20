@@ -236,19 +236,44 @@ export function ZBar({ value, max = 3 }: { value: number | null | undefined; max
   );
 }
 
-/** Evidence strength from a t-stat: makes "is this real?" visible at a glance. */
-export function Reliability({ t, n }: { t: number | null | undefined; n?: number }) {
+/** Is this effect real? "reliable" only when it survives the false-discovery correction
+ * (q ≤ 0.10) and both halves of its history agree; otherwise it's labelled by why not. */
+export function Reliability({
+  t,
+  n,
+  q,
+  stable,
+  reliable,
+}: {
+  t: number | null | undefined;
+  n?: number;
+  q?: number | null;
+  stable?: boolean;
+  reliable?: boolean;
+}) {
   const abs = Math.abs(t ?? 0);
   const label =
     n != null && n < 8
       ? "thin"
-      : abs >= 3
-        ? "strong"
-        : abs >= 2
-          ? "solid"
-          : abs >= 1
-            ? "weak"
-            : "noise";
-  const toneName = label === "strong" || label === "solid" ? "amber" : "neutral";
-  return <Badge tone={toneName}>{label}</Badge>;
+      : reliable
+        ? "reliable"
+        : reliable === false && stable === false
+          ? "unstable"
+          : q != null && q > 0.1
+            ? "likely chance"
+            : abs >= 2
+              ? "unconfirmed"
+              : "noise";
+  const detail = [
+    t != null ? `t ${t.toFixed(1)}` : null,
+    n != null ? `n ${n}` : null,
+    q != null ? `q ${q.toFixed(2)}` : null,
+  ]
+    .filter(Boolean)
+    .join(" · ");
+  return (
+    <span title={detail}>
+      <Badge tone={label === "reliable" ? "amber" : "neutral"}>{label}</Badge>
+    </span>
+  );
 }

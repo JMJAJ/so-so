@@ -10,7 +10,7 @@ from typing import Callable
 
 from . import config, data, db, nlp, paper, recommendations, universe
 from .ingest import events, gdelt, macro, news, prices
-from .research import backtest, event_study, scan
+from .research import backtest, event_study, replay, scan
 
 _running: set[str] = set()
 _progress: dict[str, str] = {}
@@ -70,6 +70,7 @@ def job_research(progress) -> dict:
     bt = backtest.run(progress=progress)
     result["models"] = {k: {"has_edge": v.get("has_edge"), "oos_ic": (v.get("walk_forward") or {}).get("ic")}
                         for k, v in bt["classes"].items()}
+    result["replay"] = {k: replay.run(progress=progress).get(k) for k in ("calls", "hit_rate", "brier")}
     data.invalidate()
     scan.forecasts(refresh=True)
     return result
@@ -80,6 +81,20 @@ def job_analyst(progress) -> dict:
 
     progress("analyst investigating")
     return analyst.run(on_event=lambda e: e["type"] == "tool_call" and progress(f"tool {e['name']}"))
+
+
+def job_news_backfill(progress) -> dict:
+    """A year of Finnhub company news and three months of GDELT headlines, then dedupe and classify."""
+    result = {"finnhub": news.backfill_finnhub(progress=progress),
+              "gdelt": gdelt.backfill_doc_headlines(progress=progress)}
+    progress("marking duplicate stories")
+    result["duplicates"] = news.mark_duplicates(days=400)
+    progress("classifying backfilled headlines")
+    try:
+        result["classified"] = nlp.classify_pending(limit=5000, days=400, deadline_s=60 * 60)
+    except Exception as exc:  # no LLM configured is not fatal for ingestion
+        result["classified"] = f"skipped: {exc}"
+    return result
 
 
 def job_gdelt_backfill(progress) -> dict:
@@ -99,6 +114,7 @@ def job_init(progress) -> dict:
     result["event_impact_rows"] = event_study.compute_all(progress)
     bt = backtest.run(progress=progress)
     result["models"] = {k: v.get("has_edge") for k, v in bt["classes"].items()}
+    result["replay"] = replay.run(progress=progress).get("calls")
     data.invalidate()
     progress("news")
     result["news"] = news.update_news()
@@ -108,12 +124,13 @@ def job_init(progress) -> dict:
 
 
 JOBS: dict[str, tuple[Callable, str]] = {
-    "init": (job_init, "Full bootstrap: 10y prices, macro, events, event studies, backtest"),
+    "init": (job_init, "Full bootstrap: 10y prices, macro, events, event studies, backtest, replay"),
     "daily": (job_daily, "Daily bars, macro, events, score recommendations, forecasts"),
     "news": (job_news, "Fetch and classify headlines"),
     "monitor": (job_monitor, "Fill pending orders, enforce stops/targets/expiry"),
-    "research": (job_research, "Earnings history, event studies, walk-forward backtest"),
+    "research": (job_research, "Earnings history, event studies, walk-forward backtest, point-in-time replay"),
     "analyst": (job_analyst, "AI research run that writes recommendations"),
+    "news_backfill": (job_news_backfill, "A year of company news + 3 months of GDELT headlines, deduped, classified"),
     "gdelt_backfill": (job_gdelt_backfill, "Backfill GDELT geopolitical history"),
 }
 
