@@ -186,7 +186,7 @@ def dashboard():
 def health():
     """Liveness for the host and the keep-alive pinger (no login needed, no data exposed)."""
     return {"ok": True, "has_data": jobs.has_data(), "snapshot": {k: v for k, v in snapshot.status().items()
-                                                                  if k in ("enabled", "last_push")}}
+                                                                  if k in ("enabled", "last_push", "last_heartbeat")}}
 
 
 class LoginIn(BaseModel):

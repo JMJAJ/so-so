@@ -59,8 +59,13 @@ def test_lockout_after_repeated_failures(monkeypatch):
 class FakeStorage:
     def __init__(self):
         self.objects: dict[str, bytes] = {}
+        self.beats: list = []
+        self.missing_table = False
 
     def post(self, url, data=None, headers=None, json=None, timeout=None):
+        if "/rest/v1/" in url:
+            self.beats.append((url, json, headers["Prefer"]))
+            return _Response(404 if self.missing_table else 201)
         if "/object/list/" in url:
             return _Response(200, json_body=[{"name": n.split("/")[-1]} for n in self.objects if "/daily/" in n])
         self.objects[url] = data.read()
@@ -108,6 +113,21 @@ def test_snapshot_round_trip(nexus_db, monkeypatch):
     db.execute("DELETE FROM logs")
     assert snapshot.pull(force=True)
     assert db.one("SELECT COUNT(*) c FROM logs WHERE message='remember me'")["c"] == 1
+
+
+def test_heartbeat_upserts_one_row_and_survives_missing_table(nexus_db, monkeypatch):
+    storage = FakeStorage()
+    monkeypatch.setattr(snapshot.requests, "post", storage.post)
+    monkeypatch.setenv("SUPABASE_URL", "https://example.supabase.co")
+    monkeypatch.setenv("SUPABASE_SERVICE_KEY", "service-key")
+    monkeypatch.setattr(snapshot, "_last_beat", 0.0)
+    assert snapshot.heartbeat()
+    url, body, prefer = storage.beats[0]
+    assert url.endswith("/rest/v1/nexus_heartbeat") and body["id"] == 1 and "merge-duplicates" in prefer
+    assert not snapshot.heartbeat()  # throttled: at most every HEARTBEAT_HOURS
+    storage.missing_table = True
+    assert not snapshot.heartbeat(force=True)
+    assert snapshot.status()["heartbeat_error"]
 
 
 def test_snapshot_disabled_without_credentials(nexus_db, monkeypatch):

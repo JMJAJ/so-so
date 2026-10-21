@@ -6,6 +6,10 @@ Storage as a gzipped snapshot:
   - every SNAPSHOT_MINUTES, if the database changed, and after every job;
   - on shutdown (Render sends SIGTERM before restarts and deploys).
 One dated copy per day is also kept (the last KEEP_DAILY days) to roll back from.
+
+Supabase pauses free projects after a week without database activity, and it's not documented
+whether Storage traffic counts. So on startup and then at most every HEARTBEAT_HOURS the server
+also upserts one row into a `nexus_heartbeat` table, a definite database write (see DEPLOY.md).
 Copies are made with SQLite's backup API, so they are consistent while the app writes.
 """
 
@@ -28,11 +32,15 @@ LATEST = "nexus_v3.db.gz"
 DAILY_PREFIX = "daily/"
 KEEP_DAILY = 7
 SNAPSHOT_MINUTES = float(os.environ.get("SNAPSHOT_MINUTES", "15"))
+HEARTBEAT_TABLE = "nexus_heartbeat"
+HEARTBEAT_HOURS = 6
 
 _lock = threading.Lock()
 _stop = threading.Event()
 _thread: threading.Thread | None = None
-_state: dict = {"last_push": None, "last_error": None, "last_change": None, "restored_from": None}
+_state: dict = {"last_push": None, "last_error": None, "last_change": None, "restored_from": None,
+                "last_heartbeat": None, "heartbeat_error": None}
+_last_beat = 0.0
 
 
 def _config() -> tuple[str, str, str] | None:
@@ -120,6 +128,7 @@ def push(reason: str = "manual") -> dict:
                 db.log("warn", "snapshot", f"push failed ({reason}): {exc}")
                 return {"pushed": False, "error": str(exc)}
         _state.update(last_push=db.now_iso(), last_error=None, last_change=changed_at)
+    heartbeat()
     _prune_daily(key)
     return {"pushed": True, "bytes": size, "reason": reason}
 
@@ -139,6 +148,31 @@ def _prune_daily(key: str) -> None:
         pass  # pruning is best effort
 
 
+def heartbeat(force: bool = False) -> bool:
+    """Upsert the single heartbeat row (keeps a free Supabase project from pausing)."""
+    global _last_beat
+    config = _config()
+    if not config or (not force and time.monotonic() - _last_beat < HEARTBEAT_HOURS * 3600 and _last_beat):
+        return False
+    url, key, _ = config
+    try:
+        response = requests.post(
+            f"{url}/rest/v1/{HEARTBEAT_TABLE}", timeout=30,
+            headers=_headers(key, **{"Content-Type": "application/json",
+                                     "Prefer": "resolution=merge-duplicates,return=minimal"}),
+            json={"id": 1, "beat_at": db.now_iso(), "note": "nexus snapshot"},
+        )
+        response.raise_for_status()
+    except requests.RequestException as exc:
+        if _state["heartbeat_error"] is None:  # log once, not every tick
+            db.log("warn", "snapshot", f"heartbeat failed (did you create the {HEARTBEAT_TABLE} table?): {exc}")
+        _state["heartbeat_error"] = str(exc)
+        return False
+    _last_beat = time.monotonic()
+    _state.update(last_heartbeat=db.now_iso(), heartbeat_error=None)
+    return True
+
+
 def push_if_changed(reason: str) -> dict | None:
     if not enabled() or _db_mtime() == _state["last_change"]:
         return None
@@ -154,6 +188,7 @@ def _run() -> None:
     while not _stop.wait(SNAPSHOT_MINUTES * 60):
         try:
             push_if_changed("periodic")
+            heartbeat()
         except Exception as exc:  # never let the snapshot thread die
             _state["last_error"] = str(exc)
 
@@ -164,6 +199,7 @@ def start() -> None:
         return
     _state["last_change"] = _db_mtime() if _state["restored_from"] else None
     _stop.clear()
+    threading.Thread(target=heartbeat, kwargs={"force": True}, daemon=True, name="heartbeat").start()
     _thread = threading.Thread(target=_run, daemon=True, name="snapshot")
     _thread.start()
 
