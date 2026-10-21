@@ -1,17 +1,30 @@
 import { createFileRoute } from "@tanstack/react-router";
 
-import TerminalApp from "@/features/terminal/TerminalApp";
+import { ChatProvider } from "@/features/chat/chat-context";
+import AppShell from "@/features/shell/AppShell";
+import { NavProvider } from "@/lib/nav";
 
 export const Route = createFileRoute("/")({
   ssr: false,
   head: () => ({
     meta: [
-      { title: "NEXUS // Trustworthy Paper Trading" },
+      { title: "NEXUS // Evidence-based investment research" },
       {
         name: "description",
-        content: "A local, guarded AI paper-trading terminal with deterministic risk controls.",
+        content:
+          "AI investment research grounded in market history, news history and event studies, verified with paper trading.",
       },
     ],
   }),
-  component: TerminalApp,
+  component: Terminal,
 });
+
+function Terminal() {
+  return (
+    <NavProvider>
+      <ChatProvider>
+        <AppShell />
+      </ChatProvider>
+    </NavProvider>
+  );
+}

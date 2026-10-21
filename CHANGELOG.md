@@ -1,4 +1,25 @@
-# Changelog - Code Review Fixes
+# Changelog
+
+## 3.0.0 — Evidence-based research rebuild
+
+NEXUS was rebuilt from an intraday LLM trading bot into a research system that recommends 1–8 week
+investments from market and news history, then verifies every call with paper trading.
+
+- New backend package `server/nexus/` with a fresh SQLite store (`nexus_v3.db`). The v2 database is
+  left untouched.
+- History: 10 years of daily bars for ~150 instruments, FRED macro, ~2,500 earnings surprises,
+  GDELT geopolitical theme series, and a growing headline archive (RSS, Yahoo, Finnhub, GDELT DOC).
+- Research: point-in-time event studies, historical analogs, lead-lag correlations, and a quant
+  signal model validated walk-forward per asset class.
+- AI: pluggable providers with tool calling (Anthropic, OpenAI-compatible), a daily analyst, an
+  in-app chat with slash commands, and a CLI (`python -m nexus`) that Claude Code can drive.
+- Verification: recommendations are scored against stop/target/horizon and their benchmark;
+  calibration and per-evidence breakdowns feed back into the analyst's prompt.
+- Frontend rewritten into feature views: Today, Screener, Asset, News & events, Portfolio, Track
+  record, Settings, plus the chat drawer.
+- Removed: the 2-minute trade loop, proposals, whale feed, fine-tuning scripts, Supabase scaffolding.
+
+## 2.x — Code Review Fixes
 
 ## 2026-06-21 - Comprehensive Bug Fix and Security Update
 

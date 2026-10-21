@@ -37,3 +37,8 @@ server/__pycache__/
 server/data/
 *.pyc
 server/data/.secret
+
+# Local secrets
+.env
+server/.env
+.claude/
