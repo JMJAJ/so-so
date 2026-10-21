@@ -208,9 +208,19 @@ def status() -> list[dict]:
     } for name, (_, description) in JOBS.items()]
 
 
+_has_data: dict[str, bool] = {}
+
+
 def has_data() -> bool:
+    """Whether history has been downloaded. Polled constantly, and once true it stays true, so
+    the (slow) count over every bar runs only until the first bootstrap finishes."""
+    if _has_data.get(db.DB_PATH):
+        return True
     row = db.one("SELECT COUNT(DISTINCT instrument_id) c FROM bars")
-    return bool(row and row["c"] >= len(universe.INSTRUMENTS) // 2)
+    result = bool(row and row["c"] >= len(universe.INSTRUMENTS) // 2)
+    if result:
+        _has_data[db.DB_PATH] = True
+    return result
 
 
 def start_scheduler() -> None:

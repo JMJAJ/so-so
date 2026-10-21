@@ -9,6 +9,7 @@ from __future__ import annotations
 import json
 import os
 import sqlite3
+import threading
 from contextlib import contextmanager
 from datetime import datetime, timezone
 from typing import Any, Iterator
@@ -279,7 +280,7 @@ def today() -> str:
 
 def connect() -> sqlite3.Connection:
     os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
-    conn = sqlite3.connect(DB_PATH, timeout=30)
+    conn = sqlite3.connect(DB_PATH, timeout=30, check_same_thread=False)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA journal_mode=WAL")
     conn.execute("PRAGMA busy_timeout=10000")
@@ -287,17 +288,55 @@ def connect() -> sqlite3.Connection:
     return conn
 
 
+# One connection per thread (and database path), reused across queries: opening a connection
+# and setting its pragmas costs more than most queries here, especially on a slow host.
+_local = threading.local()
+_all: list[sqlite3.Connection] = []
+_all_lock = threading.Lock()
+
+
+def _thread_connection() -> tuple[sqlite3.Connection, dict]:
+    pool = getattr(_local, "pool", None)
+    if pool is None:
+        pool = _local.pool = {}
+    entry = pool.get(DB_PATH)
+    if entry is None:
+        conn = connect()
+        entry = pool[DB_PATH] = (conn, {"depth": 0})
+        with _all_lock:
+            _all.append(conn)
+    return entry
+
+
+def close_all() -> None:
+    """Close every pooled connection (before replacing the database file, and in tests)."""
+    with _all_lock:
+        connections = list(_all)
+        _all.clear()
+    for conn in connections:
+        try:
+            conn.close()
+        except sqlite3.Error:
+            pass
+    _local.pool = {}
+
+
 @contextmanager
 def session() -> Iterator[sqlite3.Connection]:
-    conn = connect()
+    """A transaction on this thread's connection. Nested sessions join the outer one, which
+    commits (or rolls back) once at the end."""
+    conn, state = _thread_connection()
+    state["depth"] += 1
     try:
         yield conn
-        conn.commit()
+        if state["depth"] == 1:
+            conn.commit()
     except Exception:
-        conn.rollback()
+        if state["depth"] == 1:
+            conn.rollback()
         raise
     finally:
-        conn.close()
+        state["depth"] -= 1
 
 
 # Columns added after a table first shipped: (table, column definition).

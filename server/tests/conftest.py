@@ -60,6 +60,7 @@ def nexus_db(tmp_path, monkeypatch):
 
     scan._cache.update(at=0.0, rows=[])
     yield tmp_path
+    db.close_all()
     data.invalidate()
 
 

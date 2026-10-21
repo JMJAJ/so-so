@@ -8,6 +8,7 @@ from __future__ import annotations
 import base64
 import hashlib
 import os
+import time
 
 from . import db
 
@@ -60,10 +61,28 @@ def _load_dotenv() -> None:
 _load_dotenv()
 
 
+# Settings are read on almost every request; keep them in memory. Writes through this module
+# clear the cache at once; SETTINGS_TTL bounds staleness from other processes (the CLI).
+SETTINGS_TTL = 30.0
+_settings: dict = {"path": None, "at": 0.0, "values": {}}
+
+
+def _stored() -> dict[str, str]:
+    now = time.monotonic()
+    if _settings["path"] != db.DB_PATH or now - _settings["at"] > SETTINGS_TTL:
+        values = {row["key"]: row["value"] for row in db.rows("SELECT key, value FROM settings")}
+        _settings.update(path=db.DB_PATH, at=now, values=values)
+    return _settings["values"]
+
+
+def invalidate_cache() -> None:
+    _settings["path"] = None
+
+
 def get(key: str) -> str:
-    row = db.one("SELECT value FROM settings WHERE key=?", (key,))
-    if row:
-        return row["value"]
+    stored = _stored()
+    if key in stored:
+        return stored[key]
     if key in ("llm_model", "llm_fast_model"):
         # Model defaults follow the chosen provider (Claude ids only make sense on Anthropic).
         from .llm import PROVIDERS
@@ -103,10 +122,11 @@ def set_many(values: dict[str, str]) -> None:
         "INSERT INTO settings(key, value) VALUES(?, ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value",
         [(key, str(value)) for key, value in values.items() if key in DEFAULTS],
     )
+    invalidate_cache()
 
 
 def all_settings() -> dict[str, str]:
-    stored = {row["key"]: row["value"] for row in db.rows("SELECT key, value FROM settings")}
+    stored = _stored()
     return {key: stored.get(key, get(key)) for key in DEFAULTS}
 
 
@@ -150,11 +170,11 @@ def _decrypt(ciphertext: str) -> str:
 
 
 def _stored_secret(name: str) -> str:
-    row = db.one("SELECT value FROM settings WHERE key=?", (f"secret:{name}",))
-    if not row or not row["value"]:
+    value = _stored().get(f"secret:{name}")
+    if not value:
         return ""
     try:
-        return _decrypt(row["value"])
+        return _decrypt(value)
     except Exception:
         return ""
 
@@ -174,6 +194,7 @@ def set_secret(name: str, value: str) -> None:
         "INSERT INTO settings(key, value) VALUES(?, ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value",
         (f"secret:{name}", stored),
     )
+    invalidate_cache()
 
 
 def secret_status() -> dict[str, dict]:

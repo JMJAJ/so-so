@@ -5,7 +5,7 @@ import json
 import pytest
 from fastapi.testclient import TestClient
 
-from nexus import db, jobs, llm, recommendations
+from nexus import config, db, jobs, llm, recommendations
 from nexus.agent import analyst, chat, tools
 from nexus.llm import Reply
 from nexus.llm.anthropic_provider import AnthropicProvider
@@ -250,7 +250,7 @@ def test_propose_rejects_negative_expected_value(synthetic):
 
 
 def test_propose_says_not_opened_when_limits_block(synthetic, favourable):
-    db.execute("INSERT OR REPLACE INTO settings(key,value) VALUES('max_exposure','0.01')")
+    config.set_many({"max_exposure": "0.01"})
     text, is_error = tools.call("propose_recommendation", _proposal("stock:msft"), extra={"_source": "chat"})
     assert not is_error, text
     result = json.loads(text)

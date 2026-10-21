@@ -82,6 +82,7 @@ def pull(force: bool = False) -> bool:
     with gzip.open(tmp, "rb") as src, open(db.DB_PATH + ".restore", "wb") as dst:
         shutil.copyfileobj(src, dst)
     os.remove(tmp)
+    db.close_all()  # pooled connections must not keep the old file open
     for suffix in ("-wal", "-shm"):
         if os.path.exists(db.DB_PATH + suffix):
             os.remove(db.DB_PATH + suffix)

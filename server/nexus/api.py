@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import queue
 import threading
+import time
 from contextlib import asynccontextmanager
 from datetime import date, timedelta
 
@@ -99,9 +100,16 @@ def clean(value):
 
 # ── Status ───────────────────────────────────────────────────────────────────
 
-@app.get("/api/status")
-def status():
-    coverage = db.one(
+_coverage: dict = {"at": 0.0, "path": None, "value": None}
+COVERAGE_TTL = 60.0
+
+
+def _coverage_counts() -> dict | None:
+    """Data coverage for the sidebar. Counting every bar is slow and the numbers only move when
+    a job runs, so the result is reused for a minute (the shell polls status constantly)."""
+    if _coverage["path"] == db.DB_PATH and time.monotonic() - _coverage["at"] < COVERAGE_TTL:
+        return _coverage["value"]
+    value = db.one(
         """SELECT (SELECT COUNT(DISTINCT instrument_id) FROM bars) instruments,
                   (SELECT MAX(date) FROM bars WHERE instrument_id='etf:spy') last_bar,
                   (SELECT COUNT(*) FROM events) events,
@@ -111,6 +119,13 @@ def status():
                   (SELECT MIN(date) FROM theme_series WHERE theme='_total') gdelt_from,
                   (SELECT COUNT(*) FROM event_impact) event_impact_rows"""
     )
+    _coverage.update(at=time.monotonic(), path=db.DB_PATH, value=value)
+    return value
+
+
+@app.get("/api/status")
+def status():
+    coverage = _coverage_counts()
     provider = config.get("llm_provider")
     return clean({
         "has_data": jobs.has_data(),
@@ -255,6 +270,16 @@ def asset_intraday(instrument: str, span: str = Query("1d", pattern="^(1d|5d|1mo
                   "quote": prices.quote(item.id)})
 
 
+def _asset_research(instrument_id: str, has_closes: bool) -> dict:
+    """Event effects, analogs and correlations change only when new data lands, so they share
+    the data cache (cleared after every ingest) instead of being recomputed on each visit."""
+    return data._cached(("asset-research", instrument_id), lambda: {
+        "event_effects": tools.event_effects(instrument_id),
+        "analogs": analogs.find(instrument_id) if has_closes else None,
+        "correlations": {"peers": correlation.peers(instrument_id), "lead_lag": correlation.lead_lag(instrument_id)},
+    })
+
+
 @app.get("/api/assets/{instrument}")
 def asset(instrument: str, years: float = Query(2.0, ge=0.25, le=10)):
     item = universe.require(instrument)
@@ -281,9 +306,7 @@ def asset(instrument: str, years: float = Query(2.0, ge=0.25, le=10)):
         "technicals": technicals,
         "forecast": forecast,
         "events": [{**e, "label": label(e["type"])} for e in events],
-        "event_effects": tools.event_effects(item.id),
-        "analogs": analogs.find(item.id) if item.id in closes else None,
-        "correlations": {"peers": correlation.peers(item.id), "lead_lag": correlation.lead_lag(item.id)},
+        **_asset_research(item.id, item.id in closes),
         "news": nlp.recent(item.id, days=21, limit=40),
         "recommendations": [r for r in recommendations.list_recs(None, 500) if r["instrument_id"] == item.id],
     })

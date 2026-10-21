@@ -1,19 +1,6 @@
-import { useQuery } from "@tanstack/react-query";
-import {
-  Activity,
-  BarChart3,
-  Briefcase,
-  FileText,
-  Globe,
-  LineChart,
-  Loader2,
-  MessageSquare,
-  Newspaper,
-  Settings,
-  Target,
-  Telescope,
-} from "lucide-react";
-import { lazy, Suspense, type ComponentType } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { BarChart3, Loader2, MessageSquare } from "lucide-react";
+import { Suspense, useEffect } from "react";
 
 import ChatDrawer from "@/features/chat/ChatDrawer";
 import { MarketChip } from "@/features/markets/MarketChip";
@@ -26,73 +13,30 @@ import type { SystemStatus } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
 import { Loading } from "./ui";
-
-const VIEWS: Record<
-  View,
-  { label: string; icon: ComponentType<{ className?: string }>; component: ComponentType }
-> = {
-  today: {
-    label: "Today",
-    icon: Activity,
-    component: lazy(() => import("@/features/today/TodayView")),
-  },
-  chat: {
-    label: "AI chat",
-    icon: MessageSquare,
-    component: lazy(() => import("@/features/chat/ChatView")),
-  },
-  briefs: {
-    label: "Market briefs",
-    icon: FileText,
-    component: lazy(() => import("@/features/briefs/BriefsView")),
-  },
-  ideas: {
-    label: "Screener",
-    icon: Telescope,
-    component: lazy(() => import("@/features/ideas/IdeasView")),
-  },
-  asset: {
-    label: "Asset",
-    icon: LineChart,
-    component: lazy(() => import("@/features/asset/AssetView")),
-  },
-  news: {
-    label: "News & events",
-    icon: Newspaper,
-    component: lazy(() => import("@/features/news/NewsView")),
-  },
-  portfolio: {
-    label: "Portfolio",
-    icon: Briefcase,
-    component: lazy(() => import("@/features/portfolio/PortfolioView")),
-  },
-  markets: {
-    label: "Market hours",
-    icon: Globe,
-    component: lazy(() => import("@/features/markets/MarketsView")),
-  },
-  record: {
-    label: "Track record",
-    icon: Target,
-    component: lazy(() => import("@/features/record/TrackRecordView")),
-  },
-  settings: {
-    label: "Settings",
-    icon: Settings,
-    component: lazy(() => import("@/features/settings/SettingsView")),
-  },
-};
+import { VIEWS, warmAll, warmView } from "./views";
 
 export default function AppShell() {
   const { view, go } = useNav();
   const chat = useChat();
+  const client = useQueryClient();
   const status = useQuery({
     queryKey: ["status"],
     queryFn: api.status,
-    refetchInterval: 10_000,
+    // Changes arrive over the live stream; polling is only a fallback.
+    refetchInterval: 30_000,
     retry: false,
   });
   const live = useLiveUpdates();
+  const warm = (key: View) => void warmView(client, key);
+
+  // Once the current tab has loaded, fetch every other tab's code and data in the background
+  // so switching tabs shows content immediately.
+  useEffect(() => {
+    const timer = window.setTimeout(() => void warmAll(client, view), 1500);
+    return () => window.clearTimeout(timer);
+    // Only on first load: later tab switches warm on hover.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [client]);
   const Current = VIEWS[view].component;
   const drawerOpen = chat.open && view !== "chat";
 
@@ -107,6 +51,8 @@ export default function AppShell() {
               <button
                 key={key}
                 onClick={() => go(key)}
+                onMouseEnter={() => warm(key)}
+                onFocus={() => warm(key)}
                 className={cn(
                   "flex w-full items-center gap-2.5 px-3 py-2 text-left text-[11px] font-bold uppercase tracking-[0.12em] transition-colors",
                   view === key
@@ -134,6 +80,7 @@ export default function AppShell() {
                 <button
                   key={key}
                   onClick={() => go(key)}
+                  onTouchStart={() => warm(key)}
                   className={cn(
                     "icon-button shrink-0",
                     view === key && "!border-primary !text-primary",
