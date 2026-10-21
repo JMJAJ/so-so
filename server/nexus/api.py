@@ -15,7 +15,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel
 
-from . import auth, config, data, db, jobs, live, llm, markets, nlp, paper, recommendations, snapshot, universe
+from . import auth, config, data, db, jobs, keepalive, live, llm, markets, nlp, paper, recommendations, snapshot, universe
 from .agent import analyst, chat, tools
 from .ingest import prices
 from .research import analogs, backtest, correlation, event_study, probability, replay, scan
@@ -32,6 +32,7 @@ async def lifespan(_app: FastAPI):
             print(f"[snapshot] restore failed, starting with an empty database: {exc}")
     db.init_db()
     snapshot.start()
+    keepalive.start()
     jobs.start_scheduler()
     live.start()
     if not jobs.has_data():
@@ -43,6 +44,7 @@ async def lifespan(_app: FastAPI):
         # Warm the forecast cache so the first page load doesn't pay for it.
         threading.Thread(target=lambda: scan.forecasts(), daemon=True, name="warm-forecasts").start()
     yield
+    keepalive.stop()
     live.stop()
     jobs.stop_scheduler()
     snapshot.stop()
@@ -185,8 +187,9 @@ def dashboard():
 @app.get("/api/health")
 def health():
     """Liveness for the host and the keep-alive pinger (no login needed, no data exposed)."""
-    return {"ok": True, "has_data": jobs.has_data(), "snapshot": {k: v for k, v in snapshot.status().items()
-                                                                  if k in ("enabled", "last_push")}}
+    return {"ok": True, "has_data": jobs.has_data(),
+            "snapshot": {k: v for k, v in snapshot.status().items() if k in ("enabled", "last_push", "last_heartbeat")},
+            "keepalive": {k: v for k, v in keepalive.status().items() if k in ("enabled", "last_ping")}}
 
 
 class LoginIn(BaseModel):

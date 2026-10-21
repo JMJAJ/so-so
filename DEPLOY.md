@@ -4,7 +4,8 @@
 browser ──> Vercel (static frontend, dist/client)
                │  /api/*  (rewrite in vercel.json)
                ▼
-            Render free web service (FastAPI + scheduler)  <── cron-job.org pings /api/health every 10 min
+            Render free web service (FastAPI + scheduler)  <── pings its own /api/health every 10 min
+               │                                                (cron-job.org optional backup)
                │  database snapshot every 15 min, after each job, on shutdown
                ▼
             Supabase Storage bucket "nexus" (nexus_v3.db.gz + 7 daily copies)
@@ -13,12 +14,26 @@ browser ──> Vercel (static frontend, dist/client)
 Render's free disk is wiped on every restart, deploy and spin-down, so the SQLite database
 lives in Supabase Storage and is restored when the server boots (`server/nexus/snapshot.py`).
 A free service also sleeps after 15 minutes without requests, which would stop the scheduler,
-so an external pinger keeps it awake (one always-on service fits in Render's 750 free hours).
+so the server pings its own public URL every 10 minutes (`server/nexus/keepalive.py`, on
+whenever Render sets `RENDER_EXTERNAL_URL`). One always-on service fits in Render's 750 free hours.
 
 ## 1. Supabase (storage for the database)
 
 1. In your Supabase project: **Storage → New bucket**, name `nexus`, **private** (leave "Public" off).
-2. **Project Settings → API**: copy the **Project URL** and the **service_role** key.
+2. **SQL Editor → New query**, run this once. It creates the heartbeat row the server updates
+   every 6 hours: Supabase pauses free projects after a week without database activity, and
+   snapshot uploads alone may not count.
+
+   ```sql
+   create table if not exists public.nexus_heartbeat (
+     id int primary key,
+     beat_at timestamptz not null default now(),
+     note text
+   );
+   -- No policies: only the service_role key (the server) can read or write it.
+   alter table public.nexus_heartbeat enable row level security;
+   ```
+3. **Project Settings → API**: copy the **Project URL** and the **service_role** key.
    The service_role key bypasses all access rules: put it only in Render's environment and your
    own shell, never in the frontend, `.env` files you commit, or chat.
 
@@ -47,13 +62,27 @@ Get-Content data\.secret
 
 ## 3. Render (backend)
 
-1. **New → Blueprint**, connect GitHub repo `JMJAJ/investment-angel-bot`. Pick the branch with
-   `render.yaml` (`v3-research-rebuild`, or `main` once the PR is merged).
-2. Render reads `render.yaml` and asks for each secret:
+1. Create the service, either way:
+   - **New → Blueprint**, connect GitHub repo `JMJAJ/TradeBot-alpha` and pick the branch with
+     `render.yaml` (`main` once the PR is merged). Render reads `render.yaml` and asks for each secret.
+   - **New → Web Service** (use this if the Blueprint asks for a credit card), same repo, with:
+
+     | Field | Value |
+     |---|---|
+     | Name / Region / Branch | `nexus-api` / Frankfurt / `main` |
+     | Root Directory | `server` |
+     | Language | Python 3 |
+     | Build Command | `pip install -r requirements.txt` |
+     | Start Command | `uvicorn main:app --host 0.0.0.0 --port $PORT --workers 1` |
+     | Instance Type | **Free** |
+     | Advanced → Health Check Path | `/api/health` |
+
+     plus environment variables `PYTHON_VERSION=3.13.5` and `SNAPSHOT_BUCKET=nexus`.
+2. The secrets (environment variables):
 
    | Variable | Value |
    |---|---|
-   | `NEXUS_PASSWORD` | the password for the website (long) |
+   | `NEXUS_PASSWORD` | the website login password: you make it up (long and random, keep it in a password manager) |
    | `NEXUS_SECRET` | output of `Get-Content data\.secret` above |
    | `SUPABASE_URL` | Supabase Project URL |
    | `SUPABASE_SERVICE_KEY` | Supabase service_role key |
@@ -63,8 +92,9 @@ Get-Content data\.secret
 
 3. Deploy. When it's live, open `https://nexus-api.onrender.com/api/health` (Render shows the
    exact URL; if the name was taken it has a suffix). You want
-   `{"ok": true, "has_data": true, "snapshot": {"enabled": true, ...}}`.
+   `{"ok": true, "has_data": true, "snapshot": {"enabled": true, "last_heartbeat": "...", ...}}`.
    `has_data: false` means the snapshot wasn't found: check step 2 and the bucket name.
+   `last_heartbeat: null` means the heartbeat table is missing (step 1.2); Settings → logs shows why.
 
 ## 4. Vercel (frontend)
 
@@ -74,11 +104,18 @@ Get-Content data\.secret
    (build `npm run build`, output `dist/client`); no environment variables needed.
 3. Open the Vercel URL and sign in with `NEXUS_PASSWORD`.
 
-## 5. Keep it awake (cron-job.org)
+## 5. Keep it awake
 
-Create a free account at https://cron-job.org, then **Create cronjob**:
-URL `https://nexus-api.onrender.com/api/health`, every **10 minutes**. That's the only route that
-works without logging in, and it exposes no data.
+Nothing to do: on Render the server pings its own `/api/health` every 10 minutes, which counts
+as inbound traffic and resets the 15-minute sleep timer. `/api/health` shows
+`"keepalive": {"enabled": true, "last_ping": "..."}` once it has run. Set `KEEPALIVE_MINUTES=0`
+to turn it off.
+
+**Optional backup (recommended):** a self-ping can't wake the service if it ever goes down anyway
+(a crash, for example running out of memory, or a Render restart), and the scheduler is down with it. A free
+https://cron-job.org job calling `https://nexus-api.onrender.com/api/health` every **10
+minutes** wakes it from outside. That's the only route that works without logging in, and it
+exposes no data.
 
 ## What runs on its own (UTC)
 
@@ -92,6 +129,8 @@ works without logging in, and it exposes no data.
 
 ## Things to watch
 
+- **Supabase pausing**: if Supabase still emails a pause warning, open the project dashboard once
+  (that counts as activity) and check that `nexus_heartbeat.beat_at` is recent.
 - **Memory**: free instances have 512 MB. If the Saturday research job crashes the service
   (Render shows "Out of memory" events), run that job locally and push a snapshot, or upgrade
   the instance.

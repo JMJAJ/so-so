@@ -59,8 +59,13 @@ def test_lockout_after_repeated_failures(monkeypatch):
 class FakeStorage:
     def __init__(self):
         self.objects: dict[str, bytes] = {}
+        self.beats: list = []
+        self.missing_table = False
 
     def post(self, url, data=None, headers=None, json=None, timeout=None):
+        if "/rest/v1/" in url:
+            self.beats.append((url, json, headers["Prefer"]))
+            return _Response(404 if self.missing_table else 201)
         if "/object/list/" in url:
             return _Response(200, json_body=[{"name": n.split("/")[-1]} for n in self.objects if "/daily/" in n])
         self.objects[url] = data.read()
@@ -110,6 +115,47 @@ def test_snapshot_round_trip(nexus_db, monkeypatch):
     assert db.one("SELECT COUNT(*) c FROM logs WHERE message='remember me'")["c"] == 1
 
 
+def test_heartbeat_upserts_one_row_and_survives_missing_table(nexus_db, monkeypatch):
+    storage = FakeStorage()
+    monkeypatch.setattr(snapshot.requests, "post", storage.post)
+    monkeypatch.setenv("SUPABASE_URL", "https://example.supabase.co")
+    monkeypatch.setenv("SUPABASE_SERVICE_KEY", "service-key")
+    monkeypatch.setattr(snapshot, "_last_beat", 0.0)
+    assert snapshot.heartbeat()
+    url, body, prefer = storage.beats[0]
+    assert url.endswith("/rest/v1/nexus_heartbeat") and body["id"] == 1 and "merge-duplicates" in prefer
+    assert not snapshot.heartbeat()  # throttled: at most every HEARTBEAT_HOURS
+    storage.missing_table = True
+    assert not snapshot.heartbeat(force=True)
+    assert snapshot.status()["heartbeat_error"]
+
+
 def test_snapshot_disabled_without_credentials(nexus_db, monkeypatch):
     monkeypatch.delenv("SUPABASE_URL", raising=False)
     assert not snapshot.enabled() and snapshot.push("x")["pushed"] is False
+
+
+def test_keepalive_pings_own_url_only_on_render(nexus_db, monkeypatch):
+    from nexus import keepalive
+
+    monkeypatch.delenv("RENDER_EXTERNAL_URL", raising=False)
+    assert not keepalive.enabled() and not keepalive.ping()
+    calls = []
+
+    class Ok:
+        def raise_for_status(self):
+            pass
+
+    monkeypatch.setattr(keepalive.requests, "get", lambda url, timeout=None: calls.append(url) or Ok())
+    monkeypatch.setenv("RENDER_EXTERNAL_URL", "https://nexus-api.onrender.com/")
+    assert keepalive.enabled() and keepalive.ping()
+    assert calls == ["https://nexus-api.onrender.com/api/health"]
+    assert keepalive.status()["last_ping"]
+    monkeypatch.setenv("KEEPALIVE_MINUTES", "0")
+    assert not keepalive.enabled()
+
+    def down(url, timeout=None):
+        raise keepalive.requests.ConnectionError("unreachable")
+
+    monkeypatch.setattr(keepalive.requests, "get", down)
+    assert not keepalive.ping() and keepalive.status()["last_error"]

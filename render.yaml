@@ -5,7 +5,8 @@
 # - The disk is wiped on every restart, deploy and spin-down, so the SQLite database lives in
 #   Supabase Storage (nexus/snapshot.py) and is restored on boot.
 # - A free service sleeps after 15 minutes without requests, which also stops the scheduler.
-#   Point an external pinger (cron-job.org, every 10 min) at /api/health to keep it awake.
+#   The server pings its own RENDER_EXTERNAL_URL/api/health every KEEPALIVE_MINUTES to stay awake;
+#   an external pinger (cron-job.org) on /api/health is an optional backup that can also wake it.
 # - Keep a single worker: the scheduler and live-update ticker run inside the process.
 services:
   - type: web
@@ -37,6 +38,8 @@ services:
         value: nexus
       - key: SNAPSHOT_MINUTES
         value: "15"
+      - key: KEEPALIVE_MINUTES
+        value: "10"
       # Data and AI providers.
       - key: NVIDIA_API_KEY
         sync: false
