@@ -6,6 +6,6 @@
   "outputDirectory": "dist/client",
   "rewrites": [
     { "source": "/api/:path*", "destination": "https://nexus-api-01di.onrender.com/api/:path*" },
-    { "source": "/:path*", "destination": "/_shell.html" }
+    { "source": "/(.*)", "destination": "/_shell.html" }
   ]
 }
