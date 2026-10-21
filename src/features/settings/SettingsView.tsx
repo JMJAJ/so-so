@@ -193,6 +193,19 @@ function SettingsForm() {
               <option value="false">Off (track calls only)</option>
             </select>
           </Field>
+          <Field
+            label="Starting money"
+            hint="$ in the paper account. Equity = this + realized + open P&L, so a change applies at once; open positions keep their size."
+          >
+            <input
+              className="terminal-input"
+              type="number"
+              step="100"
+              min="100"
+              value={values.starting_equity ?? ""}
+              onChange={(e) => set("starting_equity", e.target.value)}
+            />
+          </Field>
           <Field label="Risk per trade" hint="Fraction of equity lost if the stop is hit">
             <input
               className="terminal-input"

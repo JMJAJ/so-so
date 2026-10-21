@@ -159,3 +159,12 @@ def test_keepalive_pings_own_url_only_on_render(nexus_db, monkeypatch):
 
     monkeypatch.setattr(keepalive.requests, "get", down)
     assert not keepalive.ping() and keepalive.status()["last_error"]
+
+
+def test_starting_money_setting_is_validated(client, monkeypatch):
+    monkeypatch.delenv("NEXUS_PASSWORD", raising=False)
+    ok = client.put("/api/settings", json={"values": {"starting_equity": "2,500"}, "secrets": {}})
+    assert ok.status_code == 200 and ok.json()["values"]["starting_equity"] == "2500"
+    assert client.get("/api/portfolio").json()["equity"] == 2500
+    assert client.put("/api/settings", json={"values": {"starting_equity": "5"}, "secrets": {}}).status_code == 400
+    assert client.put("/api/settings", json={"values": {"starting_equity": "lots"}, "secrets": {}}).status_code == 400

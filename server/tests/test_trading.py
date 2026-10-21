@@ -105,3 +105,13 @@ def test_state_changes_publish_live_events(synthetic):
     topics = [e["topic"] for e in live.wait(start, timeout=0)]
     assert topics.count("portfolio") >= 2 and "logs" in topics
     assert live.wait(live.current_seq(), timeout=0.05) == []
+
+
+def test_small_accounts_get_fractional_shares(synthetic):
+    config.set_many({"starting_equity": "2000"})
+    item = __import__("nexus.universe", fromlist=["x"]).require("stock:msft")
+    whole = paper.size_for(item, 300.0, 285.0, 100_000)
+    small = paper.size_for(item, 3000.0, 2850.0, 2_000)
+    assert whole == int(whole) and whole > 1
+    assert 0 < small < 1  # one share would cost more than the account's position cap
+    assert paper.portfolio()["starting_equity"] == 2000

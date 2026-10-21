@@ -73,7 +73,8 @@ def size_for(item: universe.Instrument, entry: float, stop: float, equity: float
     if unit_notional and quantity * unit_notional > max_notional:
         quantity = max_notional / unit_notional
     if item.asset_class in ("stock", "etf"):
-        quantity = float(int(quantity))
+        # Whole shares, or a fraction when not even one share fits (small accounts).
+        quantity = float(int(quantity)) if quantity >= 1 else round(quantity, 4)
     elif item.asset_class == "commodity":
         quantity = float(int(quantity)) or (1.0 if unit_notional <= max_notional else 0.0)
     else:

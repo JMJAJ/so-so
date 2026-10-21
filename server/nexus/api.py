@@ -602,6 +602,14 @@ def get_settings():
 
 @app.put("/api/settings")
 def put_settings(body: SettingsIn):
+    if "starting_equity" in body.values:
+        try:
+            amount = float(str(body.values["starting_equity"]).replace(",", "").replace("$", ""))
+        except ValueError:
+            raise ValueError("Starting money must be a number") from None
+        if not 100 <= amount <= 1_000_000_000:
+            raise ValueError("Starting money must be between $100 and $1,000,000,000")
+        body.values["starting_equity"] = str(int(amount)) if amount.is_integer() else f"{amount:.2f}"
     config.set_many(body.values)
     for name, value in body.secrets.items():
         config.set_secret(name, value)
