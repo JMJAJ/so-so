@@ -90,7 +90,7 @@ Get-Content data\.secret
    | `FINNHUB_API_KEY` | your Finnhub key |
    | `FRED_API_KEY` | optional; leave empty if you don't have one |
 
-3. Deploy. When it's live, open `https://nexus-api.onrender.com/api/health` (Render shows the
+3. Deploy. When it's live, open `https://nexus-api-01di.onrender.com/api/health` (Render shows the
    exact URL; if the name was taken it has a suffix). You want
    `{"ok": true, "has_data": true, "snapshot": {"enabled": true, "last_heartbeat": "...", ...}}`.
    `has_data: false` means the snapshot wasn't found: check step 2 and the bucket name.
@@ -98,7 +98,7 @@ Get-Content data\.secret
 
 ## 4. Vercel (frontend)
 
-1. If Render's URL is not exactly `https://nexus-api.onrender.com`, edit the `/api` rewrite in
+1. If Render's URL is not exactly `https://nexus-api-01di.onrender.com`, edit the `/api` rewrite in
    `vercel.json` to your URL and push.
 2. **Add New → Project**, import the same repo and branch. Vercel picks up `vercel.json`
    (build `npm run build`, output `dist/client`); no environment variables needed.
@@ -113,7 +113,7 @@ to turn it off.
 
 **Optional backup (recommended):** a self-ping can't wake the service if it ever goes down anyway
 (a crash, for example running out of memory, or a Render restart), and the scheduler is down with it. A free
-https://cron-job.org job calling `https://nexus-api.onrender.com/api/health` every **10
+https://cron-job.org job calling `https://nexus-api-01di.onrender.com/api/health` every **10
 minutes** wakes it from outside. That's the only route that works without logging in, and it
 exposes no data.
 

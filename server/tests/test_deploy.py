@@ -147,9 +147,9 @@ def test_keepalive_pings_own_url_only_on_render(nexus_db, monkeypatch):
             pass
 
     monkeypatch.setattr(keepalive.requests, "get", lambda url, timeout=None: calls.append(url) or Ok())
-    monkeypatch.setenv("RENDER_EXTERNAL_URL", "https://nexus-api.onrender.com/")
+    monkeypatch.setenv("RENDER_EXTERNAL_URL", "https://nexus-api-01di.onrender.com/")
     assert keepalive.enabled() and keepalive.ping()
-    assert calls == ["https://nexus-api.onrender.com/api/health"]
+    assert calls == ["https://nexus-api-01di.onrender.com/api/health"]
     assert keepalive.status()["last_ping"]
     monkeypatch.setenv("KEEPALIVE_MINUTES", "0")
     assert not keepalive.enabled()
