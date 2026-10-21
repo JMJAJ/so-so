@@ -133,3 +133,29 @@ def test_heartbeat_upserts_one_row_and_survives_missing_table(nexus_db, monkeypa
 def test_snapshot_disabled_without_credentials(nexus_db, monkeypatch):
     monkeypatch.delenv("SUPABASE_URL", raising=False)
     assert not snapshot.enabled() and snapshot.push("x")["pushed"] is False
+
+
+def test_keepalive_pings_own_url_only_on_render(nexus_db, monkeypatch):
+    from nexus import keepalive
+
+    monkeypatch.delenv("RENDER_EXTERNAL_URL", raising=False)
+    assert not keepalive.enabled() and not keepalive.ping()
+    calls = []
+
+    class Ok:
+        def raise_for_status(self):
+            pass
+
+    monkeypatch.setattr(keepalive.requests, "get", lambda url, timeout=None: calls.append(url) or Ok())
+    monkeypatch.setenv("RENDER_EXTERNAL_URL", "https://nexus-api.onrender.com/")
+    assert keepalive.enabled() and keepalive.ping()
+    assert calls == ["https://nexus-api.onrender.com/api/health"]
+    assert keepalive.status()["last_ping"]
+    monkeypatch.setenv("KEEPALIVE_MINUTES", "0")
+    assert not keepalive.enabled()
+
+    def down(url, timeout=None):
+        raise keepalive.requests.ConnectionError("unreachable")
+
+    monkeypatch.setattr(keepalive.requests, "get", down)
+    assert not keepalive.ping() and keepalive.status()["last_error"]

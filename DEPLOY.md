@@ -4,7 +4,8 @@
 browser ──> Vercel (static frontend, dist/client)
                │  /api/*  (rewrite in vercel.json)
                ▼
-            Render free web service (FastAPI + scheduler)  <── cron-job.org pings /api/health every 10 min
+            Render free web service (FastAPI + scheduler)  <── pings its own /api/health every 10 min
+               │                                                (cron-job.org optional backup)
                │  database snapshot every 15 min, after each job, on shutdown
                ▼
             Supabase Storage bucket "nexus" (nexus_v3.db.gz + 7 daily copies)
@@ -13,7 +14,8 @@ browser ──> Vercel (static frontend, dist/client)
 Render's free disk is wiped on every restart, deploy and spin-down, so the SQLite database
 lives in Supabase Storage and is restored when the server boots (`server/nexus/snapshot.py`).
 A free service also sleeps after 15 minutes without requests, which would stop the scheduler,
-so an external pinger keeps it awake (one always-on service fits in Render's 750 free hours).
+so the server pings its own public URL every 10 minutes (`server/nexus/keepalive.py`, on
+whenever Render sets `RENDER_EXTERNAL_URL`). One always-on service fits in Render's 750 free hours.
 
 ## 1. Supabase (storage for the database)
 
@@ -102,11 +104,18 @@ Get-Content data\.secret
    (build `npm run build`, output `dist/client`); no environment variables needed.
 3. Open the Vercel URL and sign in with `NEXUS_PASSWORD`.
 
-## 5. Keep it awake (cron-job.org)
+## 5. Keep it awake
 
-Create a free account at https://cron-job.org, then **Create cronjob**:
-URL `https://nexus-api.onrender.com/api/health`, every **10 minutes**. That's the only route that
-works without logging in, and it exposes no data.
+Nothing to do: on Render the server pings its own `/api/health` every 10 minutes, which counts
+as inbound traffic and resets the 15-minute sleep timer. `/api/health` shows
+`"keepalive": {"enabled": true, "last_ping": "..."}` once it has run. Set `KEEPALIVE_MINUTES=0`
+to turn it off.
+
+**Optional backup (recommended):** a self-ping can't wake the service if it ever goes down anyway
+(a crash, for example running out of memory, or a Render restart), and the scheduler is down with it. A free
+https://cron-job.org job calling `https://nexus-api.onrender.com/api/health` every **10
+minutes** wakes it from outside. That's the only route that works without logging in, and it
+exposes no data.
 
 ## What runs on its own (UTC)
 
