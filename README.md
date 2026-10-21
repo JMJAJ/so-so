@@ -47,6 +47,10 @@ pairs and commodity futures.
   evidence is trusted.
 - **Checks on the AI.** Every t-stat, `n` and percentage the AI quotes is looked up in the tool
   results it actually received, and anything unsupported is flagged under the answer.
+- **Skills the AI loads and is measured on.** Playbooks for the pre-trade checklist, reviewing
+  open positions, news triage and post-mortems, plus an event playbook rebuilt from the reliable
+  event studies. Every call records which skills were loaded; the Track Record shows results by
+  skill, and AI early closes are compared with what holding would have returned.
 - **Portfolio risk.** A new position whose returns move with existing ones (60-day correlation,
   adjusted for long/short) counts as the same bet. It's refused above two risk budgets per bet.
 - **Verification.** Recommendations are scored on their own path (stop, target or horizon) against
@@ -135,7 +139,7 @@ python -m nexus news-backfill        # ~1y Finnhub company news + 3 months GDELT
 | monitor (fills, stops, targets, expiry) | every 5 min |
 | news fetch + LLM classification | every 30 min |
 | daily data, scoring, forecasts | 21:45 daily |
-| AI analyst run | 22:30 Mon–Fri |
+| AI analyst run (market brief + new calls) | 22:30 daily |
 | earnings, event studies, backtest, replay | Saturday 06:00 |
 | GDELT history backfill | every 2 h until complete |
 
@@ -152,4 +156,4 @@ python -m nexus news-backfill        # ~1y Finnhub company news + 3 months GDELT
   stock's excess drift over the S&P 500; event studies are relative to a benchmark, which limits it.
 - This is a research tool with paper money. It is not investment advice.
 
-See `AGENTS.md` for the code layout.
+See `DEPLOY.md` to run it online (Render + Supabase + Vercel, free tiers) and `AGENTS.md` for the code layout.

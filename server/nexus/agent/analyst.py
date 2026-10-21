@@ -20,6 +20,11 @@ answer, not an error to work around. Zero is a fine answer when nothing has real
 that already have an open recommendation. Prefer ideas where several independent kinds of
 evidence agree (event history, analogs, quant model, lead-lag drivers, news).
 
+Before recording any call, load pre-trade-checklist and follow it; load event-playbook and news-triage
+before leaning on events or headlines. Then review the open recommendations with position-review
+(load it first): hold by default, close_recommendation only when an invalidation condition has
+actually happened.
+
 Finish with a short market brief (what matters this week, what you recommended and why, what you
 looked at and rejected)."""
 

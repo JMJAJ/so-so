@@ -7,7 +7,7 @@ from datetime import date
 from typing import Callable
 
 from .. import llm
-from . import factcheck, tools
+from . import factcheck, skills, tools
 
 PRINCIPLES = f"""You are NEXUS, the research analyst inside a paper-trading terminal. Today is {{today}}.
 Your job is to find what is most worth investing in over the next 1–8 weeks across stocks, ETFs,
@@ -31,7 +31,8 @@ Write plainly and compactly. Use markdown tables for comparisons, and show_chart
 
 
 def system_prompt(extra: str = "") -> str:
-    return PRINCIPLES.replace("{today}", date.today().isoformat()) + ("\n\n" + extra if extra else "")
+    base = PRINCIPLES.replace("{today}", date.today().isoformat()) + "\n\n" + skills.prompt_section()
+    return base + ("\n\n" + extra if extra else "")
 
 
 def run(
@@ -73,7 +74,9 @@ def run(
             if blocked:
                 content, is_error = f'{{"error": "{blocked}"}}', True
             else:
-                content, is_error = tools.call(call["name"], call["input"], extra=tool_extra)
+                # Calls record which skills were loaded so far in this conversation.
+                extra = {**(tool_extra or {}), "_skills": skills.loaded_in(history)}
+                content, is_error = tools.call(call["name"], call["input"], extra=extra)
             if call["name"] == "show_chart" and not is_error:
                 # The chart goes to the UI; the model only needs the summary.
                 payload = json.loads(content)

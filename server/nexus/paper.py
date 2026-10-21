@@ -13,12 +13,13 @@ count as part of the same bet; the order is refused when that bet would exceed
 
 from __future__ import annotations
 
+import threading
 import uuid
 from datetime import datetime, timedelta, timezone
 
 import numpy as np
 
-from . import config, data, db, universe
+from . import config, data, db, live, universe
 from .ingest import prices
 
 SLIPPAGE_BPS = {"stock": 2.0, "etf": 1.0, "crypto": 10.0, "forex": 1.0, "commodity": 3.0}
@@ -26,6 +27,7 @@ FEE_BPS = {"stock": 0.0, "etf": 0.0, "crypto": 10.0, "forex": 0.0, "commodity": 
 MAX_POSITION_PCT = 0.25
 CORRELATION_DAYS = 60
 SAME_BET_RHO = 0.5
+_monitor_lock = threading.Lock()  # the scheduler and the live ticker both run monitor()
 
 
 def _usd_per_unit_move(item: universe.Instrument, price: float) -> float:
@@ -143,6 +145,7 @@ def open_position(instrument_id: str, side: str, *, stop: float, target: float |
         (position_id, item.id, side, qty, "pending", db.now_iso(), stop, target, expires_at, recommendation_id, source),
     )
     _try_fill(db.one("SELECT * FROM positions WHERE id=?", (position_id,)), quote)
+    live.publish("portfolio")
     db.log("info", "order", f"{side.upper()} {qty:g} {item.symbol} (stop {stop:g}, target {target}) via {source}")
     return db.one("SELECT * FROM positions WHERE id=?", (position_id,))
 
@@ -156,11 +159,13 @@ def _try_fill(position: dict, quote: dict | None) -> bool:
     if stop is not None and ((position["side"] == "long" and fill <= stop) or (position["side"] == "short" and fill >= stop)):
         db.execute("DELETE FROM positions WHERE id=?", (position["id"],))
         db.log("warn", "order", f"Cancelled pending {item.symbol}: price already through stop at the open")
+        live.publish("portfolio")
         return False
     db.execute(
         "UPDATE positions SET status='open', entry_price=?, entry_fee=?, opened_at=? WHERE id=?",
         (fill, _fee(item, position["quantity"], fill), db.now_iso(), position["id"]),
     )
+    live.publish("portfolio")
     return True
 
 
@@ -171,6 +176,7 @@ def close_position(position_id: str, *, reason: str = "manual", price: float | N
     item = universe.require(position["instrument_id"])
     if position["status"] == "pending":
         db.execute("DELETE FROM positions WHERE id=?", (position_id,))
+        live.publish("portfolio")
         return {"cancelled": True}
     if price is None:
         quote = prices.quote(item.id)
@@ -191,6 +197,7 @@ def close_position(position_id: str, *, reason: str = "manual", price: float | N
         )
         conn.execute("DELETE FROM positions WHERE id=?", (position_id,))
     db.log("info", "exit", f"Closed {item.symbol} @ {exit_price:.4f} ({reason}); net {gross - fees:+.2f}")
+    live.publish("portfolio")
     return {"trade_id": trade_id, "net_pnl": gross - fees, "exit_price": exit_price, "reason": reason}
 
 
@@ -198,6 +205,11 @@ def close_position(position_id: str, *, reason: str = "manual", price: float | N
 
 def monitor() -> dict:
     """Fill pending orders, enforce stops/targets/expiry. Safe to run every few minutes."""
+    with _monitor_lock:
+        return _monitor()
+
+
+def _monitor() -> dict:
     positions = db.rows("SELECT * FROM positions")
     if not positions:
         return {"filled": 0, "closed": 0}

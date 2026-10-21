@@ -2,6 +2,7 @@ import { createFileRoute } from "@tanstack/react-router";
 
 import { ChatProvider } from "@/features/chat/chat-context";
 import AppShell from "@/features/shell/AppShell";
+import { LoginGate } from "@/features/shell/LoginGate";
 import { NavProvider } from "@/lib/nav";
 
 export const Route = createFileRoute("/")({
@@ -21,10 +22,12 @@ export const Route = createFileRoute("/")({
 
 function Terminal() {
   return (
-    <NavProvider>
-      <ChatProvider>
-        <AppShell />
-      </ChatProvider>
-    </NavProvider>
+    <LoginGate>
+      <NavProvider>
+        <ChatProvider>
+          <AppShell />
+        </ChatProvider>
+      </NavProvider>
+    </LoginGate>
   );
 }

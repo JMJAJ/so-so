@@ -4,16 +4,18 @@ computed from stored history, so every claim the model makes can be traced."""
 from __future__ import annotations
 
 import json
+from datetime import date
 from typing import Callable
 
 import numpy as np
 import pandas as pd
 
 from .. import config, data, db, nlp, paper, recommendations, universe
-from ..ingest import prices
+from ..ingest import events, prices
 from ..research import analogs, backtest, correlation, event_study, probability, replay, scan
 from ..research.features import asset_features, regime_frame, regime_label
 from ..taxonomy import EVENT_TYPES, NEWS_CATEGORIES
+from . import skills
 
 MAX_CHARS = 14000
 
@@ -69,10 +71,21 @@ def asset_snapshot(instrument: str) -> dict:
         "forecast_20d": {k: forecast.get(k) for k in ("expected_return", "prob_up", "sigma", "score", "model_has_edge",
                                                       "signals", "contributions")} if forecast else None,
         "recent_events": [{k: e[k] for k in ("date", "type", "title")} for e in event_study.recent_events(14, item.id)][:12],
+        "next_earnings": _next_earnings(item),
         "open_recommendation": next(
             ({k: r[k] for k in ("id", "direction", "entry_price", "stop", "target", "probability", "mark_return")}
              for r in recommendations.list_recs("open") if r["instrument_id"] == item.id), None),
     })
+
+
+def _next_earnings(item) -> dict | None:
+    if item.asset_class != "stock":
+        return None
+    when = events.next_earnings(item.id)
+    if not when:
+        return {"date": None, "note": "no scheduled report found"}
+    days = (date.fromisoformat(when) - date.today()).days
+    return {"date": when, "calendar_days_away": days}
 
 
 def recent_news(instrument: str | None = None, days: int = 7, category: str | None = None,
@@ -173,7 +186,8 @@ def model_validation(asset_class: str | None = None) -> dict:
 def list_recommendations(status: str = "open") -> dict:
     return {"rows": [{k: r.get(k) for k in ("id", "symbol", "direction", "horizon_days", "entry_price", "stop", "target",
                                             "probability", "confidence", "status", "mark_return", "realized_return",
-                                            "excess_return", "created_at", "thesis")}
+                                            "excess_return", "created_at", "expires_at", "thesis", "invalidation",
+                                            "skills", "lesson")}
                      for r in recommendations.list_recs(status if status != "all" else None, 50)]}
 
 
@@ -201,9 +215,22 @@ def _confidence(prob: dict) -> str:
     return "low"
 
 
+def load_skill(name: str) -> dict:
+    skill = skills.get(name)
+    return {"skill": skill.tag, "instructions": skill.body}
+
+
+def close_recommendation(recommendation_id: str, reason: str, _skills: list[str] | None = None, **_extra) -> dict:
+    rec = recommendations.close_early(recommendation_id, reason, skills=_skills)
+    return {"closed": f"{rec['symbol']} {rec['direction']} closed early at {rec['exit_price']:.4g} "
+                      f"({rec['realized_return']:+.2%}).",
+            "note": "What holding would have returned is recorded later and shown in the track record."}
+
+
 def propose_recommendation(**payload) -> dict:
     source = payload.pop("_source", "chat")
     run_id = payload.pop("_run_id", None)
+    loaded = payload.pop("_skills", None) or []
     item = _inst(payload.get("instrument_id", ""))
     snapshot = next((row for row in scan.forecasts() if row["instrument_id"] == item.id), None)
     direction = str(payload.get("direction", "")).lower()
@@ -230,13 +257,14 @@ def propose_recommendation(**payload) -> dict:
     payload["evidence"] = [*(payload.get("evidence") or []),
                            {"type": "calibration", "summary": prob["explanation"]}]
     rec = recommendations.create({**payload, "instrument_id": item.id}, source=source, run_id=run_id,
-                                 signal_snapshot=snapshot)
+                                 signal_snapshot=snapshot, skills=loaded)
     result = {
         "paper_position": _position_status(rec),
         "recorded": {k: rec.get(k) for k in ("id", "symbol", "direction", "entry_price", "stop", "target",
                                              "probability", "confidence")},
         "probability": {"computed": prob["probability"], "you_stated": stated, "how": prob["explanation"],
                         "components": prob["components"]},
+        "skills_recorded": loaded or "none (load pre-trade-checklist before proposing)",
         "instruction": "Report the paper_position line exactly as stated, and quote the computed probability, "
                        "not your own.",
     }
@@ -320,9 +348,25 @@ TOOLS: dict[str, dict] = {
         "description": "Walk-forward backtest results of the quant model and each signal, per asset class.",
         "parameters": {"type": "object", "properties": {"asset_class": {"type": "string", "enum": ["stock", "etf", "crypto", "forex", "commodity"]}}},
     },
+    "load_skill": {
+        "fn": load_skill,
+        "description": "Load a skill (step-by-step playbook) by name before the task it covers. The skills "
+                       "available are listed in your instructions. Skills you load are recorded with any call you make.",
+        "parameters": {"type": "object", "properties": {"name": {"type": "string"}}, "required": ["name"]},
+    },
+    "close_recommendation": {
+        "fn": close_recommendation,
+        "description": "Close an open recommendation (and its paper position) before its stop, target or horizon. "
+                       "Only when its invalidation condition has happened: load position-review first. Every early "
+                       "close is compared with what holding would have returned.",
+        "parameters": {"type": "object", "properties": {
+            "recommendation_id": {"type": "string"},
+            "reason": {"type": "string", "description": "Which invalidation condition happened, with the data"}},
+            "required": ["recommendation_id", "reason"]},
+    },
     "list_recommendations": {
         "fn": list_recommendations,
-        "description": "List recommendations by status.",
+        "description": "List recommendations by status, with each call's invalidation condition, skills used and lesson.",
         "parameters": {"type": "object", "properties": {"status": {"type": "string", "enum": ["open", "closed", "cancelled", "all"]}}},
     },
     "show_chart": {
@@ -377,6 +421,9 @@ def specs(exclude: tuple[str, ...] = ()) -> list[dict]:
             for name, tool in TOOLS.items() if name not in exclude]
 
 
+WITH_CONTEXT = ("propose_recommendation", "close_recommendation")  # receive _source/_run_id/_skills
+
+
 def call(name: str, arguments: dict, *, extra: dict | None = None) -> tuple[str, bool]:
     """Run a tool; returns (json_text, is_error). Errors go back to the model as data."""
     tool = TOOLS.get(name)
@@ -386,7 +433,7 @@ def call(name: str, arguments: dict, *, extra: dict | None = None) -> tuple[str,
         return json.dumps({"error": "tool input was not valid JSON; resend the call"}), True
     try:
         kwargs = dict(arguments or {})
-        if name == "propose_recommendation" and extra:
+        if name in WITH_CONTEXT and extra:
             kwargs.update(extra)
         result = tool["fn"](**kwargs)
         text = json.dumps(result, default=str)

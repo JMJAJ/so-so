@@ -32,8 +32,10 @@ The frontend is TanStack Start (React 19). The backend is a Python FastAPI packa
 | `server/nexus/research/signals.py` | Signal panel (shared by backtest and live) and model application |
 | `server/nexus/research/backtest.py` | Walk-forward validation per asset class, with point-in-time signal selection |
 | `server/nexus/agent/{tools,loop,analyst,chat}.py` | Tool registry, provider-neutral tool loop, daily analyst, chat (slash commands) |
+| `server/nexus/agent/skills.py`, `server/nexus/skills/*.md` | Skills: playbooks the AI loads with `load_skill` (one generated from data); each call records `name@version` |
 | `server/nexus/agent/factcheck.py` | Checks t/n/% numbers in AI answers against that turn's tool results |
 | `server/nexus/agent/charts.py` | `show_chart` payloads built from stored data; the loop sends them to the UI and only a summary to the model |
+| `server/nexus/snapshot.py`, `server/nexus/auth.py` | Deploy: SQLite snapshots to Supabase Storage; `NEXUS_PASSWORD` login (see DEPLOY.md) |
 | `server/nexus/paper.py` | Paper broker: sizing, fills, stops/targets/expiry, correlated-risk limit, portfolio |
 | `server/nexus/recommendations.py` | Recommendation lifecycle, scoring, track record, lessons |
 | `server/nexus/api.py` | All HTTP routes (chat is SSE) |
@@ -59,6 +61,9 @@ npm run typecheck && npm run lint                # frontend checks
   evidence only when `reliable` (q ≤ 0.10 after Benjamini–Hochberg, stable across halves, n ≥ 8).
 - **The server owns probabilities.** `propose_recommendation` computes them in
   `research/probability.py` and rejects calls with EV ≤ 0. Never reintroduce LLM-stated probabilities.
+- **Skills are process, not beliefs.** A skill says how to check something with the tools, never
+  "X tends to go up after Y" unless it is generated from reliable event studies. Bump `version` when
+  a skill's meaning changes so the track record compares versions separately.
 - **Styling**: Tailwind v4 with the semantic tokens in `src/styles.css` (`bull`, `bear`,
   `primary`, `muted-foreground`), the `terminal-panel` utility, uppercase wide-tracked labels.
   Use the primitives in `src/features/shell/ui.tsx`.

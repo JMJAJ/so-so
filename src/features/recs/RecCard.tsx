@@ -73,6 +73,46 @@ export function RecCard({ rec, compact = false }: { rec: Recommendation; compact
           </span>
         ))}
       </div>
+      {(rec.skills?.length || rec.lesson || rec.exit_reason === "ai_review") && (
+        <div className="space-y-1 border-t border-border/60 px-3 py-2 text-[10px] text-muted-foreground">
+          {rec.skills && rec.skills.length > 0 && (
+            <div className="flex flex-wrap items-center gap-1">
+              <span className="font-bold uppercase tracking-wider text-foreground">Skills:</span>
+              {rec.skills.map((tag) => (
+                <Badge key={tag}>{tag.replace("@", " v")}</Badge>
+              ))}
+            </div>
+          )}
+          {rec.exit_reason === "ai_review" && (
+            <div>
+              <span className="font-bold uppercase tracking-wider text-foreground">
+                Closed early by AI
+              </span>
+              {rec.hold_return != null ? (
+                <>
+                  {" "}
+                  · holding would have made{" "}
+                  <span className={tone(rec.hold_return)}>
+                    {pct(rec.hold_return)}
+                  </span> (closing{" "}
+                  <span className={tone((rec.realized_return ?? 0) - rec.hold_return)}>
+                    {(rec.realized_return ?? 0) >= rec.hold_return ? "helped" : "hurt"}
+                  </span>
+                  )
+                </>
+              ) : (
+                " · what holding would have made is scored when the original stop, target or horizon resolves"
+              )}
+            </div>
+          )}
+          {rec.lesson && (
+            <div>
+              <span className="font-bold uppercase tracking-wider text-foreground">Lesson: </span>
+              {rec.lesson}
+            </div>
+          )}
+        </div>
+      )}
       {open && (
         <div className="space-y-2 border-t border-border/60 px-3 py-3">
           <Markdown text={rec.thesis} />

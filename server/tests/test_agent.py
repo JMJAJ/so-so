@@ -5,7 +5,7 @@ import json
 import pytest
 from fastapi.testclient import TestClient
 
-from nexus import db, jobs, llm
+from nexus import db, jobs, llm, recommendations
 from nexus.agent import analyst, chat, tools
 from nexus.llm import Reply
 from nexus.llm.anthropic_provider import AnthropicProvider
@@ -160,7 +160,7 @@ def client(synthetic, monkeypatch):
 def test_api_endpoints(client):
     for path in ["/api/status", "/api/dashboard", "/api/forecasts", "/api/assets/stock:aapl", "/api/events",
                  "/api/event-types", "/api/news", "/api/portfolio", "/api/track-record", "/api/models",
-                 "/api/settings", "/api/jobs", "/api/runs", "/api/universe"]:
+                 "/api/settings", "/api/jobs", "/api/runs", "/api/briefs", "/api/markets", "/api/universe"]:
         response = client.get(path)
         assert response.status_code == 200, f"{path}: {response.text[:300]}"
     assert client.get("/api/assets/nope:nope").status_code == 404
@@ -256,3 +256,51 @@ def test_propose_says_not_opened_when_limits_block(synthetic, favourable):
     result = json.loads(text)
     assert result["paper_position"].startswith("NOT OPENED:") and "exposure" in result["paper_position"]
     assert db.one("SELECT COUNT(*) c FROM recommendations")["c"] == 1
+
+
+def test_skills_catalog_and_load():
+    from nexus.agent import skills
+
+    names = {s["name"] for s in skills.catalog()}
+    assert {"pre-trade-checklist", "position-review", "news-triage", "post-mortem", "event-playbook"} <= names
+    text, is_error = tools.call("load_skill", {"name": "pre-trade-checklist"})
+    assert not is_error and json.loads(text)["skill"] == "pre-trade-checklist@1"
+    assert tools.call("load_skill", {"name": "nope"})[1]
+    assert "pre-trade-checklist" in skills.prompt_section()
+
+
+def test_skills_loaded_in_chat_are_recorded_and_tracked(synthetic, favourable, monkeypatch):
+    provider = ScriptedProvider([
+        Reply(text="", tool_calls=[{"id": "s1", "name": "load_skill", "input": {"name": "pre-trade-checklist"}}]),
+        Reply(text="", tool_calls=[{"id": "p1", "name": "propose_recommendation", "input": _proposal("stock:nvda")}]),
+        Reply(text="Done."),
+    ])
+    monkeypatch.setattr(llm, "create", lambda kind="main": provider)
+    chat.send(None, "/recommend NVDA")
+    rec = db.one("SELECT id, skills FROM recommendations")
+    assert json.loads(rec["skills"]) == ["pre-trade-checklist@1"]
+    # Close it early through the tool; holding is scored once the path resolves.
+    text, is_error = tools.call("close_recommendation", {"recommendation_id": rec["id"],
+                                                         "reason": "Invalidation hit: closed below the 50-day average"},
+                                extra={"_skills": ["position-review@1"]})
+    assert not is_error, text
+    row = db.one("SELECT status, exit_reason, close_skills FROM recommendations")
+    assert row["status"] == "closed" and row["exit_reason"] == "ai_review"
+    assert json.loads(row["close_skills"]) == ["position-review@1"]
+    db.execute("UPDATE recommendations SET expires_at='2000-01-01T00:00:00+00:00', created_at='2020-01-01T00:00:00+00:00'")
+    assert recommendations.score_early_closes() == 1
+    record = recommendations.track_record()
+    assert record["by_skill"]["pre-trade-checklist@1"]["n"] == 1
+    assert record["early_closes"]["scored"] == 1 and record["early_closes"]["avg_saved"] is not None
+
+
+def test_postmortems_write_lessons(synthetic, favourable, monkeypatch):
+    tools.call("propose_recommendation", _proposal("stock:msft"), extra={"_source": "chat"})
+    rec_id = db.one("SELECT id FROM recommendations")["id"]
+    recommendations._close(recommendations.get(rec_id), _price("stock:msft") * 0.94, "stop")
+    provider = ScriptedProvider([Reply(text="Analogs alone were not enough; no second kind of evidence agreed.")])
+    monkeypatch.setattr(llm, "create", lambda kind="main": provider)
+    assert recommendations.write_postmortems() == 1
+    assert "post-mortem" not in provider.calls[0]["system"][:20] and "two sentences" in provider.calls[0]["system"]
+    assert "Analogs alone" in db.one("SELECT lesson FROM recommendations")["lesson"]
+    assert "Recent post-mortems" in recommendations.lessons()

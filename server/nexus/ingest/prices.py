@@ -105,7 +105,7 @@ def update_bars(
 
 # ── Live quotes ──────────────────────────────────────────────────────────────
 
-QUOTE_TTL = 60
+QUOTE_TTL = 30
 STALE_AFTER = {"crypto": 30 * 60, "forex": 60 * 60, "stock": 60 * 60, "etf": 60 * 60, "commodity": 60 * 60, "index": 60 * 60}
 _quotes: dict[str, dict] = {}
 
@@ -145,19 +145,30 @@ def _public(item: Instrument) -> dict:
 
 
 def _refresh_quotes(items: list[Instrument]) -> None:
+    """Latest price from 1-minute bars; instruments with no 1-minute data today (market not
+    open yet) fall back to the last 15-minute bar of the past five days."""
     fetched_at = time.time()
+    missing = _fetch_quotes(items, period="1d", interval="1m", fetched_at=fetched_at)
+    if missing:
+        _fetch_quotes(missing, period="5d", interval="15m", fetched_at=fetched_at)
+
+
+def _fetch_quotes(items: list[Instrument], *, period: str, interval: str, fetched_at: float) -> list[Instrument]:
+    missing: list[Instrument] = []
     for offset in range(0, len(items), BATCH):
         batch = items[offset:offset + BATCH]
         try:
             frame = yf.download(
-                [item.provider_symbol for item in batch], period="5d", interval="15m",
+                [item.provider_symbol for item in batch], period=period, interval=interval,
                 group_by="ticker", auto_adjust=True, threads=True, progress=False, prepost=False,
             )
         except Exception:
+            missing.extend(batch)
             continue
         for item in batch:
             sub = _frame_for(frame, item.provider_symbol, len(batch))
             if sub is None:
+                missing.append(item)
                 continue
             closes = sub["Close"]
             price = float(closes.iloc[-1])
@@ -175,3 +186,60 @@ def _refresh_quotes(items: list[Instrument]) -> None:
                 "as_of_epoch": ts.timestamp(),
                 "fetched_at": fetched_at,
             }
+    return missing
+
+
+# ── Intraday bars (asset charts) ─────────────────────────────────────────────
+
+INTRADAY = {"1d": ("1d", "1m"), "5d": ("5d", "5m"), "1mo": ("1mo", "30m")}
+INTRADAY_TTL = 20
+_intraday: dict[tuple[str, str], tuple[float, list[dict]]] = {}
+
+
+def intraday(item: Instrument, span: str = "1d") -> list[dict]:
+    """Intraday OHLCV including pre/after-market, as [{t: epoch seconds, o, h, l, c, v}].
+    "1d" is the latest session with 1-minute bars (before today's open, the previous one)."""
+    key = (item.id, span)
+    cached = _intraday.get(key)
+    if cached and time.time() - cached[0] < INTRADAY_TTL:
+        return cached[1]
+    period, interval = INTRADAY[span]
+    frame = _download_intraday(item, period, interval)
+    if span == "1d" and frame is None:
+        frame = _download_intraday(item, "5d", interval)
+        if frame is not None:
+            last_day = frame.index[-1].date()
+            frame = frame[[ts.date() == last_day for ts in frame.index]]
+    rows = [] if frame is None else [
+        {"t": int(pd.Timestamp(ts).timestamp()), "o": _num(r["Open"]), "h": _num(r["High"]),
+         "l": _num(r["Low"]), "c": _num(r["Close"]), "v": _num(r.get("Volume"))}
+        for ts, r in frame.iterrows()
+    ]
+    _intraday[key] = (time.time(), rows)
+    return rows
+
+
+def _download_intraday(item: Instrument, period: str, interval: str) -> pd.DataFrame | None:
+    try:
+        frame = yf.download(item.provider_symbol, period=period, interval=interval, auto_adjust=True,
+                            progress=False, prepost=True, threads=False)
+    except Exception:
+        return None
+    if isinstance(frame.columns, pd.MultiIndex):
+        frame.columns = frame.columns.get_level_values(0)
+    if frame is None or frame.empty or "Close" not in frame:
+        return None
+    frame = frame.dropna(subset=["Close"])
+    if frame.empty:
+        return None
+    if frame.index.tz is None:
+        frame.index = frame.index.tz_localize("UTC")
+    return frame
+
+
+def _num(value) -> float | None:
+    try:
+        value = float(value)
+    except (TypeError, ValueError):
+        return None
+    return None if value != value else value

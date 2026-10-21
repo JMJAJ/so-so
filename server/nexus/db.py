@@ -94,6 +94,13 @@ CREATE TABLE IF NOT EXISTS event_impact (
     PRIMARY KEY (type, instrument_id, horizon)
 ) WITHOUT ROWID;
 
+-- Next scheduled earnings report per stock (for "is there earnings inside the holding period?").
+CREATE TABLE IF NOT EXISTS upcoming_earnings (
+    instrument_id TEXT PRIMARY KEY,
+    date TEXT,
+    updated_at TEXT NOT NULL
+);
+
 -- Point-in-time replay of the evidence policy: what its calls would have done.
 CREATE TABLE IF NOT EXISTS replay_calls (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -300,6 +307,12 @@ COLUMN_MIGRATIONS = [
     ("news", "duplicate_of TEXT"),
     ("recommendations", "stated_probability REAL"), ("recommendations", "fact_check TEXT"),
     ("recommendations", "base_probability REAL"), ("replay_calls", "base REAL"),
+    # Skills the AI had loaded when it made the call / closed it early, as JSON ["name@version"].
+    ("recommendations", "skills TEXT"), ("recommendations", "close_skills TEXT"),
+    # AI early close: what holding to stop/target/horizon would have returned instead.
+    ("recommendations", "hold_return REAL"),
+    # Post-mortem lesson written after the call closed.
+    ("recommendations", "lesson TEXT"),
 ]
 
 
@@ -347,7 +360,10 @@ def log(level: str, kind: str, message: str) -> None:
     try:
         execute("INSERT INTO logs(created_at, level, kind, message) VALUES(?,?,?,?)", (now_iso(), level, kind, message[:2000]))
     except sqlite3.Error:
-        pass
+        return
+    from . import live
+
+    live.publish("logs")
 
 
 def dumps(value: Any) -> str:

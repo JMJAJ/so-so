@@ -3,6 +3,7 @@ import {
   Activity,
   BarChart3,
   Briefcase,
+  FileText,
   Globe,
   LineChart,
   Loader2,
@@ -19,6 +20,7 @@ import { MarketChip } from "@/features/markets/MarketChip";
 import { useChat } from "@/features/chat/chat-context";
 import { api } from "@/lib/api";
 import { ago } from "@/lib/format";
+import { useLiveUpdates, type LiveState } from "@/lib/live";
 import { useNav, type View } from "@/lib/nav";
 import type { SystemStatus } from "@/lib/types";
 import { cn } from "@/lib/utils";
@@ -38,6 +40,11 @@ const VIEWS: Record<
     label: "AI chat",
     icon: MessageSquare,
     component: lazy(() => import("@/features/chat/ChatView")),
+  },
+  briefs: {
+    label: "Market briefs",
+    icon: FileText,
+    component: lazy(() => import("@/features/briefs/BriefsView")),
   },
   ideas: {
     label: "Screener",
@@ -85,6 +92,7 @@ export default function AppShell() {
     refetchInterval: 10_000,
     retry: false,
   });
+  const live = useLiveUpdates();
   const Current = VIEWS[view].component;
   const drawerOpen = chat.open && view !== "chat";
 
@@ -140,6 +148,7 @@ export default function AppShell() {
           <div className="hidden flex-1 lg:block">
             <BootstrapBanner status={status.data} />
           </div>
+          <LiveDot live={live} />
           {!status.error && (
             <MarketChip marketId="nyse" className="hidden shrink-0 md:inline-flex" />
           )}
@@ -179,6 +188,32 @@ export default function AppShell() {
       </div>
       <ChatDrawer />
     </div>
+  );
+}
+
+function LiveDot({ live }: { live: LiveState }) {
+  const last = live.lastEventAt
+    ? ` (last update ${new Date(live.lastEventAt).toLocaleTimeString()})`
+    : "";
+  return (
+    <span
+      className="flex shrink-0 items-center gap-1.5 text-[10px] font-bold uppercase tracking-[0.15em]"
+      title={
+        live.connected
+          ? `Live: pages refresh as soon as data changes${last}`
+          : "Reconnecting to live updates; pages still refresh on a timer"
+      }
+    >
+      <span
+        className={cn(
+          "h-1.5 w-1.5 rounded-full",
+          live.connected ? "animate-pulse bg-bull" : "bg-muted-foreground",
+        )}
+      />
+      <span className={live.connected ? "text-bull" : "text-muted-foreground"}>
+        {live.connected ? "live" : "offline"}
+      </span>
+    </span>
   );
 }
 

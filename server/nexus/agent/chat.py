@@ -21,6 +21,9 @@ SLASH = {
     "/backtest": "Show model_validation{arg} and explain plainly which signals have a real out-of-sample edge and which don't.",
     "/record": "Show my track record and what it says about which evidence works.",
     "/portfolio": "Review my paper portfolio: positions, risk, and anything that looks invalidated.",
+    "/review": "Load position-review and review every open recommendation{arg}. Close one with close_recommendation "
+               "only if its invalidation condition has actually happened; otherwise hold. End with the summary table.",
+    "/skills": "List the skills you can load and, from track_record by_skill, how calls made with each have done.",
     "/recommend": "Investigate {arg} and, if the evidence is strong enough, record a recommendation with propose_recommendation.",
     "/invest": "Find the best paper investments to make right now{arg}. Start with scan_universe and macro_regime, then "
                "investigate the 3-6 strongest candidates (event_effects, analogs, correlations, recent_news). Record up to "
@@ -33,7 +36,8 @@ SLASH = {
 
 CHAT_EXTRA = """You are talking with the user directly. Use tools before answering factual questions
 about markets; do not answer from memory. Only call propose_recommendation when the user asks you to
-recommend, invest or trade (or uses /recommend or /invest). Use show_chart when the user asks to see
+recommend, invest or trade (or uses /recommend or /invest), and close_recommendation only when the user asks
+to review or close positions (/review). Load the matching skill first. Use show_chart when the user asks to see
 something or when a chart makes the answer clearer."""
 
 
@@ -46,7 +50,7 @@ def expand(text: str) -> str:
     if not template:
         return text
     arg = arg.strip()
-    if command.lower() in ("/scan", "/news", "/backtest", "/invest"):
+    if command.lower() in ("/scan", "/news", "/backtest", "/invest", "/review", "/skills"):
         return template.format(arg=f" (focus: {arg})" if arg else "", max_recs=config.get_int("analyst_max_recs"))
     if command.lower() == "/chart":
         return template.format(arg=arg or "my paper equity vs the S&P 500")

@@ -3,6 +3,7 @@ import { createContext, useCallback, useContext, useEffect, useState, type React
 export type View =
   | "today"
   | "chat"
+  | "briefs"
   | "ideas"
   | "asset"
   | "news"
@@ -13,6 +14,7 @@ export type View =
 export const VIEWS: View[] = [
   "today",
   "chat",
+  "briefs",
   "ideas",
   "asset",
   "news",

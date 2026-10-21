@@ -3,6 +3,7 @@ import { useState } from "react";
 
 import { CalibrationChart } from "@/features/charts/svg";
 import { RecCard } from "@/features/recs/RecCard";
+import { Markdown } from "@/features/shell/Markdown";
 import {
   Badge,
   Empty,
@@ -28,7 +29,13 @@ export default function TrackRecordView() {
   });
   const models = useQuery({ queryKey: ["models"], queryFn: api.models });
   const [group, setGroup] = useState<
-    "by_evidence" | "by_asset_class" | "by_confidence" | "by_direction" | "by_source" | "by_exit"
+    | "by_evidence"
+    | "by_skill"
+    | "by_asset_class"
+    | "by_confidence"
+    | "by_direction"
+    | "by_source"
+    | "by_exit"
   >("by_evidence");
 
   if (record.isLoading) return <Loading />;
@@ -82,6 +89,7 @@ export default function TrackRecordView() {
           actions={(
             [
               "by_evidence",
+              "by_skill",
               "by_asset_class",
               "by_confidence",
               "by_direction",
@@ -108,6 +116,8 @@ export default function TrackRecordView() {
         </Panel>
       </div>
 
+      <SkillsPanel record={data} />
+
       <ReplayPanel record={data} />
 
       <Panel
@@ -131,6 +141,95 @@ export default function TrackRecordView() {
         )}
       </Panel>
     </div>
+  );
+}
+
+function SkillsPanel({ record }: { record: TrackRecord }) {
+  const skills = useQuery({ queryKey: ["skills"], queryFn: api.skills });
+  const [shown, setShown] = useState<string | null>(null);
+  const body = useQuery({
+    queryKey: ["skill", shown],
+    queryFn: () => api.skill(shown as string),
+    enabled: Boolean(shown),
+  });
+  const early = record.early_closes;
+  return (
+    <Panel
+      title="AI skills"
+      subtitle="Playbooks the AI loads before a task. Every call records which skills (and versions) were loaded, so this shows whether a skill actually improves results. Generated skills are rebuilt from the data."
+    >
+      {skills.isLoading ? (
+        <Loading />
+      ) : (
+        <div className="space-y-4">
+          <TableWrap>
+            <thead>
+              <tr>
+                <Th>Skill</Th>
+                <Th>Use when</Th>
+                <Th right>Closed calls</Th>
+                <Th right>Hit rate</Th>
+                <Th right>Avg return</Th>
+                <Th />
+              </tr>
+            </thead>
+            <tbody>
+              {(skills.data ?? []).map((skill) => {
+                const stats = Object.values(skill.stats);
+                const n = stats.reduce((sum, s) => sum + (s.n ?? 0), 0);
+                const latest = Object.entries(skill.stats).at(-1)?.[1];
+                return (
+                  <tr key={skill.name}>
+                    <Td>
+                      <div className="font-bold">{skill.name}</div>
+                      <div className="max-w-[340px] whitespace-normal text-[10px] text-muted-foreground">
+                        {skill.description}
+                      </div>
+                    </Td>
+                    <Td className="min-w-[180px] max-w-[240px] whitespace-normal text-[10px] text-muted-foreground">
+                      {skill.when}
+                    </Td>
+                    <Td right>{n}</Td>
+                    <Td right>{pct(latest?.hit_rate ?? null, 0, false)}</Td>
+                    <Td right className={tone(latest?.avg_return)}>
+                      {pct(latest?.avg_return ?? null)}
+                    </Td>
+                    <Td>
+                      <button
+                        className="secondary-button !px-2 !py-1"
+                        onClick={() => setShown(shown === skill.name ? null : skill.name)}
+                      >
+                        {shown === skill.name ? "hide" : "read"}
+                      </button>
+                    </Td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </TableWrap>
+          {shown && (
+            <div className="min-w-0 overflow-hidden break-words border border-border p-3 text-[12px]">
+              {body.data ? (
+                <>
+                  <div className="mb-2 text-[10px] uppercase tracking-wider text-primary">
+                    {body.data.name} · version {body.data.version}
+                  </div>
+                  <Markdown text={body.data.body} />
+                </>
+              ) : (
+                <Loading />
+              )}
+            </div>
+          )}
+          <p className="text-[11px] text-muted-foreground">
+            AI early closes: {early.n} so far
+            {early.scored > 0 && early.avg_saved != null
+              ? `; ${early.helped} of ${early.scored} beat holding, ${pct(early.avg_saved)} per call vs holding.`
+              : "; none scored against holding yet."}
+          </p>
+        </div>
+      )}
+    </Panel>
   );
 }
 
