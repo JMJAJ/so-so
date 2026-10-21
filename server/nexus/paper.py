@@ -271,7 +271,7 @@ def portfolio(*, mark: bool = True) -> dict:
             exposure += size
         direction = 1 if row["side"] == "long" else -1
         out_positions.append({
-            **row, "symbol": item.symbol, "name": item.name, "asset_class": item.asset_class,
+            **row, "symbol": item.symbol, "name": item.name, "asset_class": item.asset_class, "market": item.market_id,
             "current_price": current, "pnl": open_pnl, "notional": size,
             "pnl_pct": ((current / entry - 1) * 100 * direction) if (entry and current) else 0.0,
             "quote_as_of": quote.get("as_of") if quote else None,

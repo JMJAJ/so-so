@@ -3,6 +3,7 @@ import {
   Activity,
   BarChart3,
   Briefcase,
+  Globe,
   LineChart,
   Loader2,
   MessageSquare,
@@ -14,6 +15,7 @@ import {
 import { lazy, Suspense, type ComponentType } from "react";
 
 import ChatDrawer from "@/features/chat/ChatDrawer";
+import { MarketChip } from "@/features/markets/MarketChip";
 import { useChat } from "@/features/chat/chat-context";
 import { api } from "@/lib/api";
 import { ago } from "@/lib/format";
@@ -56,6 +58,11 @@ const VIEWS: Record<
     label: "Portfolio",
     icon: Briefcase,
     component: lazy(() => import("@/features/portfolio/PortfolioView")),
+  },
+  markets: {
+    label: "Market hours",
+    icon: Globe,
+    component: lazy(() => import("@/features/markets/MarketsView")),
   },
   record: {
     label: "Track record",
@@ -133,6 +140,9 @@ export default function AppShell() {
           <div className="hidden flex-1 lg:block">
             <BootstrapBanner status={status.data} />
           </div>
+          {!status.error && (
+            <MarketChip marketId="nyse" className="hidden shrink-0 md:inline-flex" />
+          )}
           {status.error ? (
             <span className="text-[10px] font-bold uppercase tracking-[0.15em] text-bear">
               backend offline

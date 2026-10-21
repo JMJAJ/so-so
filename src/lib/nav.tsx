@@ -7,6 +7,7 @@ export type View =
   | "asset"
   | "news"
   | "portfolio"
+  | "markets"
   | "record"
   | "settings";
 export const VIEWS: View[] = [
@@ -16,6 +17,7 @@ export const VIEWS: View[] = [
   "asset",
   "news",
   "portfolio",
+  "markets",
   "record",
   "settings",
 ];

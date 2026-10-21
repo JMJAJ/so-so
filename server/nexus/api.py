@@ -15,7 +15,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel
 
-from . import config, data, db, jobs, llm, nlp, paper, recommendations, universe
+from . import config, data, db, jobs, llm, markets, nlp, paper, recommendations, universe
 from .agent import analyst, chat, tools
 from .ingest import prices
 from .research import analogs, backtest, correlation, event_study, probability, replay, scan
@@ -170,6 +170,11 @@ def dashboard():
 
 # ── Universe / assets ────────────────────────────────────────────────────────
 
+@app.get("/api/markets")
+def market_hours():
+    return markets.overview()
+
+
 @app.get("/api/universe")
 def get_universe():
     quotes = {}
@@ -206,6 +211,7 @@ def asset(instrument: str, years: float = Query(2.0, ge=0.25, le=10)):
     forecast = next((row for row in scan.forecasts() if row["instrument_id"] == item.id), None)
     return clean({
         "instrument": item.to_dict(),
+        "market": markets.status(markets.BY_ID[item.market_id], days_back=0.5, days_ahead=4),
         "quote": prices.quote(item.id),
         "bars": [{"t": ts.date().isoformat(), "o": r.open, "h": r.high, "l": r.low, "c": r.close, "v": r.volume}
                  for ts, r in bars.iterrows()] if not bars.empty else [],

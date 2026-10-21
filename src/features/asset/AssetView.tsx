@@ -21,6 +21,7 @@ import {
   TableWrap,
   ZBar,
 } from "@/features/shell/ui";
+import { MarketChip } from "@/features/markets/MarketChip";
 import { api } from "@/lib/api";
 import { ago, humanize, pct, price, shortDate, signed, tone } from "@/lib/format";
 import { useNav } from "@/lib/nav";
@@ -162,6 +163,7 @@ function AssetBody({
             {item.benchmark_id && (
               <span>· measured vs {item.benchmark_id.split(":")[1].toUpperCase()}</span>
             )}
+            {item.tradable && <MarketChip marketId={item.market} detail className="basis-full" />}
           </span>
         }
         actions={

@@ -8,7 +8,7 @@ Index instruments are research-only (regime inputs), everything else is tradable
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass
-from datetime import datetime, timezone
+from datetime import datetime
 from typing import Literal
 
 AssetClass = Literal["stock", "etf", "crypto", "forex", "commodity", "index"]
@@ -37,8 +37,13 @@ class Instrument:
             return None if self.id == "crypto:btc" else "crypto:btc"
         return None
 
+    @property
+    def market_id(self) -> str:
+        """Which entry of `markets.MARKETS` this instrument trades on."""
+        return {"forex": "forex", "futures": "cme", "always": "crypto"}.get(self.session, "nyse")
+
     def to_dict(self) -> dict:
-        return {**asdict(self), "benchmark_id": self.benchmark_id}
+        return {**asdict(self), "benchmark_id": self.benchmark_id, "market": self.market_id}
 
 
 SECTOR_ETF = {
@@ -189,15 +194,10 @@ def sector_etf(item: Instrument) -> str | None:
 
 
 def is_market_open(item: Instrument, when: datetime | None = None) -> bool:
-    now = when or datetime.now(timezone.utc)
-    weekday, minute = now.weekday(), now.hour * 60 + now.minute
-    if item.session == "always":
-        return True
-    if item.session in ("forex", "futures"):
-        close_sunday = 22 * 60 if item.session == "forex" else 23 * 60
-        return not (weekday == 5 or (weekday == 4 and minute >= 21 * 60) or (weekday == 6 and minute < close_sunday))
-    # US cash equities, approximate (ignores holidays and DST shift of 1h).
-    return weekday < 5 and 13 * 60 + 30 <= minute <= 20 * 60
+    """Regular session of the instrument's market (DST and US holidays included)."""
+    from . import markets
+
+    return markets.is_open(item.market_id, when)
 
 
 def catalog() -> list[dict]:

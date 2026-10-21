@@ -15,6 +15,7 @@ import {
   Th,
   TableWrap,
 } from "@/features/shell/ui";
+import { MarketChip } from "@/features/markets/MarketChip";
 import { api } from "@/lib/api";
 import { ago, humanize, money, num, pct, price, shortDate, tone } from "@/lib/format";
 import { useNav } from "@/lib/nav";
@@ -139,6 +140,7 @@ export default function PortfolioView() {
                     >
                       {position.symbol}
                     </button>
+                    <MarketChip marketId={position.market} className="mt-0.5 block" />
                   </Td>
                   <Td>
                     <DirectionBadge direction={position.side} />

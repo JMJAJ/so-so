@@ -8,6 +8,7 @@ import type {
   Instrument,
   JobStatus,
   MarketEvent,
+  MarketsOverview,
   ModelSummary,
   NewsItem,
   Portfolio,
@@ -60,6 +61,7 @@ export const api = {
   status: () => fetchJson<SystemStatus>("/status"),
   dashboard: () => fetchJson<Dashboard>("/dashboard"),
   universe: () => fetchJson<Instrument[]>("/universe"),
+  markets: () => fetchJson<MarketsOverview>("/markets"),
   forecasts: (assetClass?: string) =>
     fetchJson<Forecast[]>(`/forecasts${qs({ asset_class: assetClass })}`),
   asset: (id: string, years = 2) =>

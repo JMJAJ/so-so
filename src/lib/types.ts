@@ -19,6 +19,8 @@ export interface Instrument {
   multiplier: number;
   tradable: boolean;
   benchmark_id: string | null;
+  /** Id of the market it trades on (see /api/markets). */
+  market?: string;
   market_open?: boolean;
   quote?: Quote | null;
 }
@@ -177,6 +179,7 @@ export interface Position {
   symbol: string;
   name: string;
   asset_class: AssetClass;
+  market?: string;
   side: "long" | "short";
   quantity: number;
   status: "pending" | "open";
@@ -337,8 +340,35 @@ export interface EventEffect {
   reliable?: boolean;
 }
 
+export interface MarketStatus {
+  id: string;
+  name: string;
+  city: string;
+  tz: string;
+  kind: "exchange" | "forex" | "futures" | "crypto";
+  note: string;
+  holidays_known: boolean;
+  open: boolean;
+  phase: "open" | "closed" | "pre-market" | "after-hours" | "lunch break";
+  local_time: string;
+  local_weekday: string;
+  tz_abbr: string;
+  closes_at: string | null;
+  opens_at: string | null;
+  next_session: [string, string] | null;
+  /** Regular sessions as UTC [open, close] ISO pairs, from ~2.5 days ago to ~8 days ahead. */
+  intervals: Array<[string, string]>;
+  extended_intervals: Array<[string, string]>;
+}
+
+export interface MarketsOverview {
+  now: string;
+  markets: MarketStatus[];
+}
+
 export interface AssetDetail {
   instrument: Instrument;
+  market?: MarketStatus;
   quote: Quote | null;
   bars: Array<{
     t: string;

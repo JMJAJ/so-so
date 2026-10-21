@@ -149,3 +149,25 @@ def test_correlated_positions_count_as_one_bet(synthetic):
     config.set_many({"max_correlated_risk": "1.5"})
     with pytest.raises(ValueError, match="same bet as XLE short"):
         paper.open_position("stock:xom", "short", stop=xom["close"].iloc[-1] * 1.05, target=None, expires_at=None)
+
+
+def test_market_hours_follow_dst_holidays_and_breaks():
+    from datetime import datetime, timezone
+
+    from nexus import markets, universe
+
+    def at(text):
+        return datetime.fromisoformat(text).replace(tzinfo=timezone.utc)
+
+    assert markets.is_open("nyse", at("2026-10-21T13:30"))  # 09:30 EDT
+    assert not markets.is_open("nyse", at("2026-11-02T14:00"))  # 09:00 EST after the DST change
+    assert markets.is_open("nyse", at("2026-11-02T14:30"))
+    assert not markets.is_open("nyse", at("2026-11-26T15:00"))  # Thanksgiving
+    assert not markets.is_open("nyse", at("2026-11-27T18:30"))  # early close 13:00
+    assert not markets.is_open("tse", at("2026-10-21T03:00"))  # Tokyo lunch 12:00 JST
+    assert markets.is_open("forex", at("2026-10-25T21:30")) and not markets.is_open("forex", at("2026-10-24T12:00"))
+    assert not markets.is_open("cme", at("2026-10-21T21:30"))  # daily 17:00-18:00 ET break
+    assert universe.is_market_open(universe.require("BTC"), at("2026-10-24T12:00"))
+    nyse = markets.status(markets.BY_ID["nyse"], at("2026-10-21T10:30"))
+    assert nyse["phase"] == "pre-market" and nyse["opens_at"] == "2026-10-21T13:30+00:00"
+    assert markets.status(markets.BY_ID["sse"], at("2026-10-21T04:00"))["phase"] == "lunch break"

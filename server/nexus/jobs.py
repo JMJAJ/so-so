@@ -226,9 +226,9 @@ def start_scheduler() -> None:
     soon = datetime.now(timezone.utc) + timedelta(seconds=90)
     scheduler.add_job(safe("monitor"), IntervalTrigger(minutes=5), id="monitor", next_run_time=soon)
     scheduler.add_job(safe("news"), IntervalTrigger(minutes=30), id="news", next_run_time=soon)
-    scheduler.add_job(safe("daily"), CronTrigger(hour=21, minute=45), id="daily")
-    scheduler.add_job(safe("analyst"), CronTrigger(day_of_week="mon-fri", hour=22, minute=30), id="analyst")
-    scheduler.add_job(safe("research"), CronTrigger(day_of_week="sat", hour=6), id="research")
+    scheduler.add_job(safe("daily"), CronTrigger(hour=21, minute=45, timezone="UTC"), id="daily")
+    scheduler.add_job(safe("analyst"), CronTrigger(day_of_week="mon-fri", hour=22, minute=30, timezone="UTC"), id="analyst")
+    scheduler.add_job(safe("research"), CronTrigger(day_of_week="sat", hour=6, timezone="UTC"), id="research")
     scheduler.add_job(safe("gdelt_backfill"), IntervalTrigger(hours=2), id="gdelt_backfill",
                       next_run_time=soon + timedelta(minutes=10))
     scheduler.start()
