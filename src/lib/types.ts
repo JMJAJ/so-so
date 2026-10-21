@@ -99,6 +99,29 @@ export interface Recommendation {
   mark_price: number | null;
   mark_return: number | null;
   trade_note?: string;
+  /** Skills loaded when the call was made / closed early, as "name@version". */
+  skills?: string[];
+  close_skills?: string[];
+  /** For AI early closes: what holding to stop/target/horizon would have returned. */
+  hold_return?: number | null;
+  lesson?: string | null;
+}
+
+export interface SkillInfo {
+  name: string;
+  description: string;
+  when: string;
+  version: string;
+  stats: Record<string, RecordStats>;
+}
+
+export interface EarlyCloseStats {
+  n: number;
+  scored: number;
+  avg_realized: number | null;
+  avg_if_held: number | null;
+  avg_saved: number | null;
+  helped: number;
 }
 
 export interface Regime {
@@ -273,6 +296,8 @@ export interface TrackRecord {
   by_source: Record<string, RecordStats>;
   by_evidence: Record<string, RecordStats>;
   by_exit: Record<string, RecordStats>;
+  by_skill: Record<string, RecordStats>;
+  early_closes: EarlyCloseStats;
   calibration: Array<{ bucket: string; n: number; stated: number; realized: number }>;
   recent: Recommendation[];
   lessons: string;
@@ -364,6 +389,23 @@ export interface MarketStatus {
 export interface MarketsOverview {
   now: string;
   markets: MarketStatus[];
+}
+
+export type IntradaySpan = "1d" | "5d" | "1mo";
+
+export interface IntradayBars {
+  instrument_id: string;
+  span: IntradaySpan;
+  /** t = epoch seconds (UTC). */
+  bars: Array<{
+    t: number;
+    o: number | null;
+    h: number | null;
+    l: number | null;
+    c: number | null;
+    v: number | null;
+  }>;
+  quote: Quote | null;
 }
 
 export interface AssetDetail {
@@ -536,6 +578,10 @@ export interface Run {
   status: string;
   summary: string | null;
   error: string | null;
+}
+
+export interface Brief extends Run {
+  recommendations: Recommendation[];
 }
 
 export interface ChatMessage {

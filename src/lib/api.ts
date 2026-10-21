@@ -1,11 +1,14 @@
 import type {
   AssetDetail,
+  Brief,
   ChatEvent,
   ChatMessage,
   Dashboard,
   EventStudyDetail,
   Forecast,
   Instrument,
+  IntradayBars,
+  IntradaySpan,
   JobStatus,
   MarketEvent,
   MarketsOverview,
@@ -13,6 +16,7 @@ import type {
   NewsItem,
   Portfolio,
   Recommendation,
+  SkillInfo,
   Run,
   Settings,
   SystemStatus,
@@ -39,6 +43,8 @@ export async function fetchJson<T>(path: string, init?: RequestInit): Promise<T>
     } catch {
       // Non-JSON error body: keep the status text.
     }
+    // A session that expired mid-use: reload so the login screen shows.
+    if (response.status === 401 && !path.startsWith("/auth/")) window.location.reload();
     throw new ApiError(response.status, message);
   }
   return (await response.json()) as T;
@@ -59,6 +65,9 @@ const qs = (params: Record<string, string | number | undefined | null>) => {
 
 export const api = {
   status: () => fetchJson<SystemStatus>("/status"),
+  authStatus: () => fetchJson<{ required: boolean; authenticated: boolean }>("/auth/status"),
+  login: (password: string) =>
+    fetchJson<{ ok: boolean }>("/auth/login", send("POST", { password })),
   dashboard: () => fetchJson<Dashboard>("/dashboard"),
   universe: () => fetchJson<Instrument[]>("/universe"),
   markets: () => fetchJson<MarketsOverview>("/markets"),
@@ -66,6 +75,8 @@ export const api = {
     fetchJson<Forecast[]>(`/forecasts${qs({ asset_class: assetClass })}`),
   asset: (id: string, years = 2) =>
     fetchJson<AssetDetail>(`/assets/${encodeURIComponent(id)}${qs({ years })}`),
+  intraday: (id: string, span: IntradaySpan) =>
+    fetchJson<IntradayBars>(`/assets/${encodeURIComponent(id)}/intraday${qs({ span })}`),
   eventStudy: (id: string, eventType: string) =>
     fetchJson<EventStudyDetail>(
       `/assets/${encodeURIComponent(id)}/event-study${qs({ event_type: eventType })}`,
@@ -107,6 +118,10 @@ export const api = {
   runAnalyst: (focus?: string) =>
     fetchJson<{ started: boolean }>("/analyst/run", send("POST", { focus: focus || null })),
   runs: () => fetchJson<Run[]>("/runs"),
+  briefs: () => fetchJson<Brief[]>("/briefs"),
+  skills: () => fetchJson<SkillInfo[]>("/skills"),
+  skill: (name: string) =>
+    fetchJson<SkillInfo & { body: string }>(`/skills/${encodeURIComponent(name)}`),
   run: (id: string) =>
     fetchJson<
       Run & { transcript: Array<Record<string, unknown>>; recommendations: Recommendation[] }

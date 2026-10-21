@@ -15,7 +15,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel
 
-from . import config, data, db, jobs, llm, markets, nlp, paper, recommendations, universe
+from . import auth, config, data, db, jobs, live, llm, markets, nlp, paper, recommendations, snapshot, universe
 from .agent import analyst, chat, tools
 from .ingest import prices
 from .research import analogs, backtest, correlation, event_study, probability, replay, scan
@@ -25,8 +25,15 @@ from .taxonomy import EVENT_TYPES, NEWS_CATEGORIES, label
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
+    if snapshot.enabled():
+        try:
+            snapshot.pull()  # throwaway disk (Render free): restore the last snapshot first
+        except Exception as exc:  # noqa: BLE001 — start fresh rather than not at all
+            print(f"[snapshot] restore failed, starting with an empty database: {exc}")
     db.init_db()
+    snapshot.start()
     jobs.start_scheduler()
+    live.start()
     if not jobs.has_data():
         try:
             jobs.run_async("init")
@@ -36,7 +43,9 @@ async def lifespan(_app: FastAPI):
         # Warm the forecast cache so the first page load doesn't pay for it.
         threading.Thread(target=lambda: scan.forecasts(), daemon=True, name="warm-forecasts").start()
     yield
+    live.stop()
     jobs.stop_scheduler()
+    snapshot.stop()
 
 
 app = FastAPI(title="NEXUS", version="3.0.0", lifespan=lifespan)
@@ -46,6 +55,13 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+@app.middleware("http")
+async def _require_login(request: Request, call_next):
+    if not auth.allowed(request.url.path, request.cookies.get(auth.COOKIE)):
+        return JSONResponse(status_code=401, content={"detail": "Login required"})
+    return await call_next(request)
 
 
 @app.exception_handler(KeyError)
@@ -81,11 +97,6 @@ def clean(value):
 
 # ── Status ───────────────────────────────────────────────────────────────────
 
-@app.get("/api/health")
-def health():
-    return {"ok": True}
-
-
 @app.get("/api/status")
 def status():
     coverage = db.one(
@@ -102,6 +113,7 @@ def status():
     return clean({
         "has_data": jobs.has_data(),
         "universe_size": len(universe.INSTRUMENTS),
+        "snapshot": snapshot.status(),
         "coverage": coverage,
         "llm": {"provider": provider, "model": config.get("llm_model"), "fast_model": config.get("llm_fast_model"),
                 "key_set": provider in ("ollama", "lmstudio") or config.secret_status().get(
@@ -170,6 +182,45 @@ def dashboard():
 
 # ── Universe / assets ────────────────────────────────────────────────────────
 
+@app.get("/api/health")
+def health():
+    """Liveness for the host and the keep-alive pinger (no login needed, no data exposed)."""
+    return {"ok": True, "has_data": jobs.has_data(), "snapshot": {k: v for k, v in snapshot.status().items()
+                                                                  if k in ("enabled", "last_push")}}
+
+
+class LoginIn(BaseModel):
+    password: str
+
+
+@app.get("/api/auth/status")
+def auth_status(request: Request):
+    return {"required": auth.required(), "authenticated": auth.valid(request.cookies.get(auth.COOKIE))}
+
+
+@app.post("/api/auth/login")
+def login(body: LoginIn, request: Request):
+    client = request.headers.get("x-forwarded-for", request.client.host if request.client else "?").split(",")[0]
+    if not auth.required():
+        return {"ok": True}
+    if auth.locked_out(client):
+        raise HTTPException(status_code=429, detail="Too many attempts; try again in 15 minutes")
+    if not auth.check_password(body.password, client):
+        raise HTTPException(status_code=401, detail="Wrong password")
+    response = JSONResponse({"ok": True})
+    secure = request.headers.get("x-forwarded-proto", request.url.scheme) == "https"
+    response.set_cookie(auth.COOKIE, auth.make_token(), max_age=auth.SESSION_DAYS * 86400, httponly=True,
+                        samesite="lax", secure=secure, path="/")
+    return response
+
+
+@app.post("/api/auth/logout")
+def logout():
+    response = JSONResponse({"ok": True})
+    response.delete_cookie(auth.COOKIE, path="/")
+    return response
+
+
 @app.get("/api/markets")
 def market_hours():
     return markets.overview()
@@ -193,9 +244,18 @@ def forecasts(asset_class: str | None = None):
     return clean(sorted(rows, key=lambda row: -scan.interest(row)))
 
 
+@app.get("/api/assets/{instrument}/intraday")
+def asset_intraday(instrument: str, span: str = Query("1d", pattern="^(1d|5d|1mo)$")):
+    item = universe.require(instrument)
+    live.watch(item.id)
+    return clean({"instrument_id": item.id, "span": span, "bars": prices.intraday(item, span),
+                  "quote": prices.quote(item.id)})
+
+
 @app.get("/api/assets/{instrument}")
 def asset(instrument: str, years: float = Query(2.0, ge=0.25, le=10)):
     item = universe.require(instrument)
+    live.watch(item.id)
     start = (date.today() - timedelta(days=int(365 * years))).isoformat()
     bars = data.ohlcv(item.id, start)
     closes = data.closes()
@@ -364,6 +424,40 @@ def runs(limit: int = Query(30, ge=1, le=200)):
     return db.rows("SELECT id, kind, started_at, finished_at, status, summary, error FROM runs ORDER BY started_at DESC LIMIT ?", (limit,))
 
 
+@app.get("/api/skills")
+def list_skills():
+    from .agent import skills
+
+    by_skill = recommendations.track_record()["by_skill"]
+    rows = []
+    for meta in skills.catalog():
+        stats = {tag: s for tag, s in by_skill.items() if tag.split("@")[0] == meta["name"]}
+        rows.append({**meta, "stats": stats})
+    return clean(rows)
+
+
+@app.get("/api/skills/{name}")
+def skill_detail(name: str):
+    from .agent import skills
+
+    skill = skills.get(name)
+    return {"name": skill.name, "version": skill.version, "description": skill.description, "when": skill.when,
+            "body": skill.body}
+
+
+@app.get("/api/briefs")
+def briefs(limit: int = Query(120, ge=1, le=1000)):
+    """Every AI analyst run, newest first: its market brief and the calls it recorded,
+    with how each call is doing (open mark or realized result)."""
+    runs = db.rows("SELECT id, started_at, finished_at, status, summary, error FROM runs WHERE kind='analyst' "
+                   "ORDER BY started_at DESC LIMIT ?", (limit,))
+    by_run: dict[str, list] = {}
+    for rec in recommendations.list_recs(None, 5000):
+        if rec.get("run_id"):
+            by_run.setdefault(rec["run_id"], []).append(rec)
+    return clean([{**run, "recommendations": by_run.get(run["id"], [])} for run in runs])
+
+
 @app.get("/api/runs/{run_id}")
 def run_detail(run_id: str):
     row = db.one("SELECT * FROM runs WHERE id=?", (run_id,))
@@ -432,6 +526,30 @@ def chat_send(body: ChatIn):
                              headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
 
 
+@app.get("/api/live")
+def live_updates(after: int | None = None):
+    """Server-sent change notifications; see nexus/live.py."""
+
+    def stream():
+        live.connected(+1)
+        last = live.current_seq() if after is None else after
+        try:
+            yield f"data: {json.dumps({'topic': 'hello', 'seq': last})}\n\n"
+            while True:
+                events = live.wait(last, timeout=15)
+                if not events:
+                    yield ": keep-alive\n\n"
+                    continue
+                for event in events:
+                    last = event["seq"]
+                    yield f"id: {last}\ndata: {json.dumps(event, default=str)}\n\n"
+        finally:
+            live.connected(-1)
+
+    return StreamingResponse(stream(), media_type="text/event-stream",
+                             headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
+
+
 # ── Jobs / settings ──────────────────────────────────────────────────────────
 
 @app.get("/api/jobs")
@@ -463,6 +581,7 @@ def put_settings(body: SettingsIn):
         config.set_secret(name, value)
     if "enabled_classes" in body.values:
         scan._cache["at"] = 0
+    live.publish("settings")
     return get_settings()
 
 

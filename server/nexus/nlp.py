@@ -6,7 +6,7 @@ import json
 import re
 import time
 
-from . import db, llm, universe
+from . import db, live, llm, universe
 from .taxonomy import NEWS_CATEGORIES
 
 BATCH = 30
@@ -82,6 +82,8 @@ def classify_pending(limit: int = 300, days: int = 3, deadline_s: float | None =
             updates,
         )
         classified += len(updates)
+        if updates:
+            live.publish("news")
     return {"classified": classified}
 
 

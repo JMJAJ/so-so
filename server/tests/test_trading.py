@@ -93,3 +93,15 @@ def test_cancel_closes_position(synthetic):
     recommendations.cancel(rec["id"])
     assert recommendations.get(rec["id"])["status"] == "cancelled"
     assert db.one("SELECT COUNT(*) c FROM positions")["c"] == 0
+
+
+def test_state_changes_publish_live_events(synthetic):
+    from nexus import live
+
+    start = live.current_seq()
+    price = db.one("SELECT close FROM bars WHERE instrument_id='etf:spy' ORDER BY date DESC LIMIT 1")["close"]
+    position = paper.open_position("etf:spy", "long", stop=price * 0.95, target=None, expires_at=None)
+    paper.close_position(position["id"], reason="manual")
+    topics = [e["topic"] for e in live.wait(start, timeout=0)]
+    assert topics.count("portfolio") >= 2 and "logs" in topics
+    assert live.wait(live.current_seq(), timeout=0.05) == []

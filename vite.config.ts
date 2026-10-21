@@ -8,6 +8,9 @@ import { defineConfig } from "@lovable.dev/vite-tanstack-config";
 export default defineConfig({
   tanstackStart: {
     server: { entry: "server" },
+    // Static single-page build (dist/client) so any static host can serve it; /api is proxied
+    // to the Python backend by the dev server locally and by vercel.json in production.
+    spa: { enabled: true },
   },
   vite: {
     build: {

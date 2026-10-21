@@ -8,7 +8,7 @@ import traceback
 from datetime import datetime, timedelta, timezone
 from typing import Callable
 
-from . import config, data, db, nlp, paper, recommendations, universe
+from . import config, data, db, live, nlp, paper, recommendations, snapshot, universe
 from .ingest import events, gdelt, macro, news, prices
 from .research import backtest, event_study, replay, scan
 
@@ -56,6 +56,11 @@ def job_daily(progress) -> dict:
     data.invalidate()
     progress("scoring recommendations")
     result["scored"] = recommendations.score_open()
+    progress("post-mortems")
+    try:
+        result["postmortems"] = recommendations.write_postmortems()
+    except Exception as exc:  # no LLM configured is not fatal for the daily refresh
+        result["postmortems"] = f"skipped: {exc}"
     paper.monitor()
     paper.snapshot_equity()
     progress("forecasts")
@@ -148,9 +153,11 @@ def run(name: str, progress: Callable[[str], None] | None = None) -> dict:
            ON CONFLICT(name) DO UPDATE SET last_started=excluded.last_started, last_status='running'""",
         (name, db.now_iso(), "running"),
     )
+    live.publish("job", name=name, status="running")
 
     def report(message: str) -> None:
         _progress[name] = message
+        live.publish("progress", name=name, message=message)
         if progress:
             progress(message)
 
@@ -158,11 +165,15 @@ def run(name: str, progress: Callable[[str], None] | None = None) -> dict:
         result = JOBS[name][0](report)
         db.execute("UPDATE jobs SET last_finished=?, last_status='ok', last_error=NULL, last_summary=?, duration_ms=? WHERE name=?",
                    (db.now_iso(), db.dumps(result)[:4000], int((time.time() - started) * 1000), name))
+        live.publish("job", name=name, status="ok")
+        if name != "monitor":
+            snapshot.push_async(f"after {name}")
         return result
     except Exception as exc:
         db.execute("UPDATE jobs SET last_finished=?, last_status='error', last_error=?, duration_ms=? WHERE name=?",
                    (db.now_iso(), f"{exc}\n{traceback.format_exc()[-1500:]}", int((time.time() - started) * 1000), name))
         db.log("error", "job", f"{name}: {exc}")
+        live.publish("job", name=name, status="error")
         raise
     finally:
         with _lock:
@@ -227,7 +238,7 @@ def start_scheduler() -> None:
     scheduler.add_job(safe("monitor"), IntervalTrigger(minutes=5), id="monitor", next_run_time=soon)
     scheduler.add_job(safe("news"), IntervalTrigger(minutes=30), id="news", next_run_time=soon)
     scheduler.add_job(safe("daily"), CronTrigger(hour=21, minute=45, timezone="UTC"), id="daily")
-    scheduler.add_job(safe("analyst"), CronTrigger(day_of_week="mon-fri", hour=22, minute=30, timezone="UTC"), id="analyst")
+    scheduler.add_job(safe("analyst"), CronTrigger(hour=22, minute=30, timezone="UTC"), id="analyst")
     scheduler.add_job(safe("research"), CronTrigger(day_of_week="sat", hour=6, timezone="UTC"), id="research")
     scheduler.add_job(safe("gdelt_backfill"), IntervalTrigger(hours=2), id="gdelt_backfill",
                       next_run_time=soon + timedelta(minutes=10))

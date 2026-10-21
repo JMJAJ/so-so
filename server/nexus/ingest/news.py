@@ -16,7 +16,7 @@ from email.utils import parsedate_to_datetime
 
 import requests
 
-from .. import config, db, universe
+from .. import config, db, live, universe
 
 RSS_FEEDS = {
     "cnbc": "https://www.cnbc.com/id/100003114/device/rss/rss.html",
@@ -63,7 +63,10 @@ def store_articles(articles: list[dict]) -> int:
         "INSERT OR IGNORE INTO news(id,published_at,title,summary,url,source,provider,tickers) VALUES(?,?,?,?,?,?,?,?)",
         records,
     )
-    return db.one("SELECT COUNT(*) c FROM news")["c"] - before
+    added = db.one("SELECT COUNT(*) c FROM news")["c"] - before
+    if added:
+        live.publish("news", added=added)
+    return added
 
 
 def _title_words(title: str) -> frozenset[str]:
@@ -96,6 +99,8 @@ def mark_duplicates(days: int = 3) -> int:
         else:
             originals.append((when, words, row["id"]))
     db.executemany("UPDATE news SET duplicate_of=? WHERE id=?", updates)
+    if updates:
+        live.publish("news")
     return len(updates)
 
 

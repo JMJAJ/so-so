@@ -25,10 +25,16 @@ import { MarketChip } from "@/features/markets/MarketChip";
 import { api } from "@/lib/api";
 import { ago, humanize, pct, price, shortDate, signed, tone } from "@/lib/format";
 import { useNav } from "@/lib/nav";
-import { SIGNALS, type AssetDetail, type Instrument } from "@/lib/types";
+import { SIGNALS, type AssetDetail, type Instrument, type IntradaySpan } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
 const CandleChart = lazy(() => import("@/features/charts/CandleChart"));
+const IntradayChart = lazy(() => import("@/features/charts/IntradayChart"));
+const SPANS: Array<[IntradaySpan, string]> = [
+  ["1d", "1D"],
+  ["5d", "5D"],
+  ["1mo", "1M"],
+];
 
 export default function AssetView() {
   const { params, openAsset } = useNav();
@@ -39,6 +45,7 @@ export default function AssetView() {
     queryFn: () => api.asset(id as string, years),
     enabled: Boolean(id),
     staleTime: 60_000,
+    refetchInterval: 60_000,
   });
 
   return (
@@ -133,6 +140,7 @@ function AssetBody({
   const [showMacro, setShowMacro] = useState(false);
   const { ask } = useChat();
   const item = data.instrument;
+  const [span, setSpan] = useState<IntradaySpan | null>(item.tradable ? "1d" : null);
   const last = data.bars.at(-1);
   const prev = data.bars.at(-2);
   const quotePrice = data.quote?.price ?? last?.c ?? null;
@@ -186,27 +194,50 @@ function AssetBody({
         }
       />
       <Panel
-        title="Price & events"
-        subtitle="Arrows: this asset's earnings beats/misses. Amber dots (toggle): macro and market events. AI calls are marked on the day they were made."
+        title={span ? "Live price" : "Price & events"}
+        subtitle={
+          span
+            ? "Intraday candles in your time, pre- and after-market included, updating as new quotes arrive. Dashed lines: the open AI call's entry, stop and target."
+            : "Arrows: this asset's earnings beats/misses. Amber dots (toggle): macro and market events. AI calls are marked on the day they were made."
+        }
         actions={[
-          <button
-            key="macro"
-            className={cn(
-              "secondary-button !px-2 !py-1",
-              showMacro && "!border-primary !text-primary",
-            )}
-            onClick={() => setShowMacro((v) => !v)}
-          >
-            macro events
-          </button>,
+          ...SPANS.map(([value, label]) => (
+            <button
+              key={value}
+              className={cn(
+                "secondary-button !px-2 !py-1",
+                span === value && "!border-primary !text-primary",
+              )}
+              onClick={() => setSpan(value)}
+            >
+              {label}
+            </button>
+          )),
+          ...(span
+            ? []
+            : [
+                <button
+                  key="macro"
+                  className={cn(
+                    "secondary-button !px-2 !py-1",
+                    showMacro && "!border-primary !text-primary",
+                  )}
+                  onClick={() => setShowMacro((v) => !v)}
+                >
+                  macro events
+                </button>,
+              ]),
           ...[1, 2, 5, 10].map((value) => (
             <button
               key={value}
               className={cn(
                 "secondary-button !px-2 !py-1",
-                years === value && "!border-primary !text-primary",
+                !span && years === value && "!border-primary !text-primary",
               )}
-              onClick={() => setYears(value)}
+              onClick={() => {
+                setSpan(null);
+                setYears(value);
+              }}
             >
               {value}y
             </button>
@@ -214,7 +245,15 @@ function AssetBody({
         ]}
         bodyClassName="p-2"
       >
-        {data.bars.length ? (
+        {span ? (
+          <Suspense fallback={<Loading />}>
+            <IntradayChart
+              instrumentId={item.id}
+              span={span}
+              recommendations={data.recommendations}
+            />
+          </Suspense>
+        ) : data.bars.length ? (
           <Suspense fallback={<Loading />}>
             <CandleChart
               bars={data.bars}

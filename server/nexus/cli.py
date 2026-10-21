@@ -89,6 +89,8 @@ def main(argv: list[str] | None = None) -> int:
     sub.add_parser("report", help="track record: is the AI actually right?")
     p = sub.add_parser("backtest", help="walk-forward validation results (use --run to recompute)")
     p.add_argument("--run", action="store_true")
+    p = sub.add_parser("snapshot", help="copy the database to/from Supabase Storage (SUPABASE_URL/SERVICE_KEY)")
+    p.add_argument("action", choices=["push", "pull", "status"])
     p = sub.add_parser("replay", help="point-in-time replay of the evidence engine (use --run to recompute)")
     p.add_argument("--run", action="store_true")
     sub.add_parser("regime", help="current macro regime")
@@ -238,6 +240,20 @@ def main(argv: list[str] | None = None) -> int:
                       f"top-bottom quintile {_pct(wf.get('long_short'))}  {row.get('reason') or ''}")
                 for name, stats in (row.get("signals") or {}).items():
                     print(f"   {name:<9} IC {stats['ic']:+.3f}  t={stats['t_stat']:+.1f}  n={stats['n']}")
+        return 0
+
+    if cmd == "snapshot":
+        from . import snapshot
+
+        if not snapshot.enabled():
+            print("Set SUPABASE_URL and SUPABASE_SERVICE_KEY (and optionally SNAPSHOT_BUCKET) first.")
+            return 1
+        if args.action == "push":
+            _print_json(snapshot.push("cli"))
+        elif args.action == "pull":
+            print("restored" if snapshot.pull(force=True) else "no snapshot found")
+        else:
+            _print_json(snapshot.status())
         return 0
 
     if cmd == "replay":

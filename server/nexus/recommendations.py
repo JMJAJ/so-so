@@ -11,7 +11,7 @@ import math
 import uuid
 from datetime import datetime, timezone
 
-from . import config, db, paper, universe
+from . import config, db, live, paper, universe
 from .ingest import prices
 
 CONFIDENCE = ("low", "medium", "high")
@@ -52,7 +52,7 @@ def _validate(payload: dict, price: float) -> dict:
 
 
 def create(payload: dict, *, source: str, run_id: str | None = None, signal_snapshot: dict | None = None,
-           auto_trade: bool | None = None) -> dict:
+           auto_trade: bool | None = None, skills: list[str] | None = None) -> dict:
     item = universe.require(str(payload.get("instrument_id") or payload.get("symbol") or ""))
     if not item.tradable:
         raise ValueError(f"{item.symbol} is research-only")
@@ -75,6 +75,8 @@ def create(payload: dict, *, source: str, run_id: str | None = None, signal_snap
          clean["invalidation"], db.dumps(signal_snapshot) if signal_snapshot else None, source, run_id, "open",
          expires_at),
     )
+    if skills:
+        db.execute("UPDATE recommendations SET skills=? WHERE id=?", (db.dumps(skills), rec_id))
     should_trade = config.get_bool("autopilot") if auto_trade is None else auto_trade
     trade_note = None
     if should_trade:
@@ -90,14 +92,15 @@ def create(payload: dict, *, source: str, run_id: str | None = None, signal_snap
     rec = get(rec_id)
     if trade_note:
         rec["trade_note"] = trade_note
+    live.publish("recommendations")
     return rec
 
 
 def _public(row: dict) -> dict:
     item = universe.get(row["instrument_id"])
     out = dict(row)
-    for key in ("catalysts", "evidence", "signal_snapshot"):
-        out[key] = db.loads(row.get(key), [] if key != "signal_snapshot" else None)
+    for key in ("catalysts", "evidence", "signal_snapshot", "skills", "close_skills"):
+        out[key] = db.loads(row.get(key), None if key == "signal_snapshot" else [])
     out["symbol"] = item.symbol if item else row["instrument_id"]
     out["name"] = item.name if item else ""
     out["asset_class"] = item.asset_class if item else ""
@@ -116,7 +119,21 @@ def list_recs(status: str | None = None, limit: int = 200) -> list[dict]:
         rows = db.rows("SELECT * FROM recommendations WHERE status=? ORDER BY created_at DESC LIMIT ?", (status, limit))
     else:
         rows = db.rows("SELECT * FROM recommendations ORDER BY created_at DESC LIMIT ?", (limit,))
-    return [_public(row) for row in rows]
+    return _live_marks([_public(row) for row in rows])
+
+
+def _live_marks(recs: list[dict]) -> list[dict]:
+    """Mark open calls at the latest quote (the stored mark is only refreshed by the daily job)."""
+    open_ids = sorted({rec["instrument_id"] for rec in recs if rec["status"] == "open"})
+    if not open_ids:
+        return recs
+    quotes = prices.quotes(open_ids)
+    for rec in recs:
+        price = (quotes.get(rec["instrument_id"]) or {}).get("price") if rec["status"] == "open" else None
+        if price and rec.get("entry_price"):
+            rec["mark_price"] = price
+            rec["mark_return"] = _ret(rec["direction"], rec["entry_price"], price)
+    return recs
 
 
 def cancel(rec_id: str, reason: str = "cancelled by user") -> dict:
@@ -127,7 +144,97 @@ def cancel(rec_id: str, reason: str = "cancelled by user") -> dict:
         paper.close_position(rec["position_id"], reason="cancelled")
     _close(rec, rec.get("mark_price") or rec["entry_price"], "cancelled")
     db.execute("UPDATE recommendations SET status='cancelled', exit_reason=? WHERE id=?", (reason, rec_id))
+    live.publish("recommendations")
     return get(rec_id)
+
+
+def close_early(rec_id: str, reason: str, *, skills: list[str] | None = None) -> dict:
+    """The AI closes an open call before its stop, target or horizon (exit_reason 'ai_review').
+    `score_open` later records what holding would have returned, so early closes are measured."""
+    rec = get(rec_id)
+    if rec["status"] != "open":
+        raise ValueError(f"{rec['symbol']} is not open (status {rec['status']})")
+    if len(reason.strip()) < 15:
+        raise ValueError("Give a concrete reason: which invalidation condition happened, with the data")
+    quote = prices.quote(rec["instrument_id"])
+    if not quote or quote["price"] is None:
+        raise ValueError(f"No price for {rec['symbol']}")
+    if rec.get("position_id") and db.one("SELECT 1 FROM positions WHERE id=?", (rec["position_id"],)):
+        paper.close_position(rec["position_id"], reason="ai_review")
+    _close(rec, quote["price"], "ai_review")
+    db.execute("UPDATE recommendations SET close_skills=?, invalidation=COALESCE(invalidation,'') || ? WHERE id=?",
+               (db.dumps(skills or []), f"\n[closed early] {reason.strip()[:400]}", rec_id))
+    db.log("info", "recommend", f"AI closed {rec['symbol']} early: {reason.strip()[:200]}")
+    return get(rec_id)
+
+
+def _path_outcome(rec: dict, bars: list[dict]) -> tuple[str, float, str] | None:
+    """First stop/target touch on daily bars after the call was made."""
+    for bar in bars:
+        if bar["low"] is None or bar["high"] is None:
+            continue
+        o = bar["open"] or bar["close"]
+        if rec["direction"] == "long":
+            if bar["low"] <= rec["stop"]:
+                return "stop", min(o, rec["stop"]), bar["date"]
+            if bar["high"] >= rec["target"]:
+                return "target", max(o, rec["target"]), bar["date"]
+        else:
+            if bar["high"] >= rec["stop"]:
+                return "stop", max(o, rec["stop"]), bar["date"]
+            if bar["low"] <= rec["target"]:
+                return "target", min(o, rec["target"]), bar["date"]
+    return None
+
+
+def score_early_closes() -> int:
+    """For AI early closes, record what holding to stop/target/horizon would have returned."""
+    done = 0
+    now = datetime.now(timezone.utc)
+    for rec in db.rows("SELECT * FROM recommendations WHERE exit_reason='ai_review' AND hold_return IS NULL"):
+        bars = db.rows("SELECT date, open, high, low, close FROM bars WHERE instrument_id=? AND date>? ORDER BY date",
+                       (rec["instrument_id"], rec["created_at"][:10]))
+        outcome = _path_outcome(rec, bars)
+        if not outcome and now >= datetime.fromisoformat(rec["expires_at"]) and bars:
+            outcome = ("horizon", bars[-1]["close"], bars[-1]["date"])
+        if outcome:
+            db.execute("UPDATE recommendations SET hold_return=? WHERE id=?",
+                       (_ret(rec["direction"], rec["entry_price"], outcome[1]), rec["id"]))
+            done += 1
+    return done
+
+
+def write_postmortems(limit: int = 10) -> int:
+    """Ask the fast model for a one-or-two sentence lesson on each newly closed call."""
+    from . import llm
+    from .agent import skills
+
+    rows = db.rows("SELECT * FROM recommendations WHERE status='closed' AND lesson IS NULL "
+                   "ORDER BY closed_at DESC LIMIT ?", (limit,))
+    if not rows:
+        return 0
+    skill = skills.get("post-mortem")
+    provider = llm.create("fast")
+    written = 0
+    for row in rows:
+        rec = _public(row)
+        facts = {k: rec.get(k) for k in ("symbol", "direction", "horizon_days", "entry_price", "stop", "target",
+                                         "probability", "base_probability", "thesis", "evidence", "invalidation",
+                                         "skills", "exit_reason", "exit_price", "realized_return", "benchmark_return",
+                                         "hold_return", "created_at", "closed_at")}
+        try:
+            reply = provider.complete(skill.body, [{"role": "user", "text": db.dumps(facts)}], max_tokens=400,
+                                      effort="low")
+        except Exception as exc:
+            db.log("warn", "post-mortem", f"{rec['symbol']}: {exc}")
+            break
+        text = " ".join((reply.text or "").split())[:400]
+        if text:
+            db.execute("UPDATE recommendations SET lesson=? WHERE id=?", (text, rec["id"]))
+            written += 1
+    if written:
+        live.publish("recommendations")
+    return written
 
 
 # ── Scoring ──────────────────────────────────────────────────────────────────
@@ -159,6 +266,7 @@ def _close(rec: dict, exit_price: float, reason: str, end_date: str | None = Non
            benchmark_return=?, excess_return=? WHERE id=?""",
         (db.now_iso(), exit_price, reason, realized, bench, realized - bench if bench is not None else None, rec["id"]),
     )
+    live.publish("recommendations")
 
 
 def score_open() -> dict:
@@ -168,23 +276,7 @@ def score_open() -> dict:
     for rec in list_recs("open"):
         bars = db.rows("SELECT date, open, high, low, close FROM bars WHERE instrument_id=? AND date>? ORDER BY date",
                        (rec["instrument_id"], rec["created_at"][:10]))
-        outcome = None
-        for bar in bars:
-            if bar["low"] is None or bar["high"] is None:
-                continue
-            o = bar["open"] or bar["close"]
-            if rec["direction"] == "long":
-                if bar["low"] <= rec["stop"]:
-                    outcome = ("stop", min(o, rec["stop"]), bar["date"])
-                elif bar["high"] >= rec["target"]:
-                    outcome = ("target", max(o, rec["target"]), bar["date"])
-            else:
-                if bar["high"] >= rec["stop"]:
-                    outcome = ("stop", max(o, rec["stop"]), bar["date"])
-                elif bar["low"] <= rec["target"]:
-                    outcome = ("target", min(o, rec["target"]), bar["date"])
-            if outcome:
-                break
+        outcome = _path_outcome(rec, bars)
         last = bars[-1] if bars else None
         if not outcome and now >= datetime.fromisoformat(rec["expires_at"]) and last:
             outcome = ("horizon", last["close"], last["date"])
@@ -197,7 +289,7 @@ def score_open() -> dict:
         if mark:
             db.execute("UPDATE recommendations SET mark_price=?, mark_return=?, marked_at=? WHERE id=?",
                        (mark, _ret(rec["direction"], rec["entry_price"], mark), db.now_iso(), rec["id"]))
-    return {"closed": closed}
+    return {"closed": closed, "early_closes_scored": score_early_closes()}
 
 
 def track_record() -> dict:
@@ -254,8 +346,25 @@ def track_record() -> dict:
         "by_source": group(lambda r: [r["source"]]),
         "by_evidence": group(lambda r: sorted({str(e.get("type", "other")) for e in r["evidence"] if isinstance(e, dict)})),
         "by_exit": group(lambda r: [r["exit_reason"] or "?"]),
+        "by_skill": group(lambda r: r["skills"] or ["(no skill)"]),
+        "early_closes": _early_close_stats(closed),
         "calibration": calibration,
         "recent": closed[:50],
+    }
+
+
+def _early_close_stats(closed: list[dict]) -> dict:
+    """AI early closes vs holding: positive `saved` means closing early helped."""
+    items = [r for r in closed if r["exit_reason"] == "ai_review"]
+    scored = [r for r in items if r.get("hold_return") is not None and r.get("realized_return") is not None]
+    saved = [r["realized_return"] - r["hold_return"] for r in scored]
+    return {
+        "n": len(items),
+        "scored": len(scored),
+        "avg_realized": sum(r["realized_return"] for r in scored) / len(scored) if scored else None,
+        "avg_if_held": sum(r["hold_return"] for r in scored) / len(scored) if scored else None,
+        "avg_saved": sum(saved) / len(saved) if saved else None,
+        "helped": sum(1 for s in saved if s > 0),
     }
 
 
@@ -272,7 +381,8 @@ def lessons() -> str:
         + f", Brier {overall['brier']:.3f} (0.25 = coin flip), avg stated probability {overall['avg_probability']:.0%}.",
     ]
     for title, key in (("By evidence type", "by_evidence"), ("By asset class", "by_asset_class"),
-                       ("By confidence", "by_confidence"), ("By direction", "by_direction")):
+                       ("By confidence", "by_confidence"), ("By direction", "by_direction"),
+                       ("By skill loaded", "by_skill")):
         parts = [f"{name}: n={s['n']} hit {s['hit_rate']:.0%} avg {s['avg_return']:+.2%}"
                  for name, s in record[key].items() if s.get("n", 0) >= 3 and s.get("hit_rate") is not None]
         if parts:
@@ -280,4 +390,13 @@ def lessons() -> str:
     for row in record["calibration"]:
         if row["n"] >= 5:
             lines.append(f"Calibration {row['bucket']}: stated {row['stated']:.0%} vs realized {row['realized']:.0%} (n={row['n']})")
+    early = record["early_closes"]
+    if early["scored"]:
+        lines.append(f"Your early closes: {early['scored']} scored; closing early {early['avg_saved']:+.2%} per call vs "
+                     f"holding ({early['helped']} of {early['scored']} helped).")
+    recent = [r for r in record["recent"] if r.get("lesson")][:8]
+    if recent:
+        lines.append("Recent post-mortems:")
+        lines += [f"- {r['symbol']} {r['direction']} ({r['realized_return']:+.1%}): {r['lesson']}" for r in recent
+                  if r.get("realized_return") is not None]
     return "\n".join(lines)

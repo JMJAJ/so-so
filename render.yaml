@@ -1,0 +1,46 @@
+# Render Blueprint for the NEXUS backend (FastAPI + in-process scheduler).
+# New > Blueprint > pick this repo. Render asks for every `sync: false` value on first deploy.
+#
+# Free-plan notes:
+# - The disk is wiped on every restart, deploy and spin-down, so the SQLite database lives in
+#   Supabase Storage (nexus/snapshot.py) and is restored on boot.
+# - A free service sleeps after 15 minutes without requests, which also stops the scheduler.
+#   Point an external pinger (cron-job.org, every 10 min) at /api/health to keep it awake.
+# - Keep a single worker: the scheduler and live-update ticker run inside the process.
+services:
+  - type: web
+    name: nexus-api
+    runtime: python
+    plan: free
+    region: frankfurt
+    rootDir: server
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn main:app --host 0.0.0.0 --port $PORT --workers 1 --proxy-headers --forwarded-allow-ips "*"
+    healthCheckPath: /api/health
+    autoDeploy: true
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.13.5
+      # Login for the public site (pick a long one).
+      - key: NEXUS_PASSWORD
+        sync: false
+      # Encrypts API keys saved in Settings and signs login cookies. Use the value of your
+      # local server/data/.secret so keys saved locally still decrypt after the move.
+      - key: NEXUS_SECRET
+        sync: false
+      # Database snapshots (Supabase > Project Settings > API: URL and the service_role key).
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_SERVICE_KEY
+        sync: false
+      - key: SNAPSHOT_BUCKET
+        value: nexus
+      - key: SNAPSHOT_MINUTES
+        value: "15"
+      # Data and AI providers.
+      - key: NVIDIA_API_KEY
+        sync: false
+      - key: FINNHUB_API_KEY
+        sync: false
+      - key: FRED_API_KEY
+        sync: false

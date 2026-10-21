@@ -185,6 +185,7 @@ def detect_earnings(instruments: list[universe.Instrument] | None = None, progre
             continue
         if frame is None or frame.empty:
             continue
+        _store_next_earnings(item.id, frame)
         for ts, row in frame.iterrows():
             surprise = row.get("Surprise(%)")
             if surprise is None or pd.isna(surprise):
@@ -209,6 +210,41 @@ def detect_earnings(instruments: list[universe.Instrument] | None = None, progre
                                 f"{item.symbol} EPS {row.get('Reported EPS')} vs est {row.get('EPS Estimate')} ({surprise:+.1f}%)",
                                 "yfinance"))
     return _save(records)
+
+
+NEXT_EARNINGS_MAX_AGE_DAYS = 7
+
+
+def _store_next_earnings(instrument_id: str, frame: pd.DataFrame) -> str | None:
+    """Earliest report date that hasn't happened yet (New York date), or None."""
+    now = pd.Timestamp.now(tz="America/New_York")
+    stamps = [pd.Timestamp(ts) for ts in frame.index]
+    future = sorted((s.tz_convert("America/New_York") if s.tzinfo else s.tz_localize("America/New_York"))
+                    for s in stamps)
+    future = [s for s in future if s.normalize() >= now.normalize()]
+    when = future[0].date().isoformat() if future else None
+    db.execute("INSERT OR REPLACE INTO upcoming_earnings(instrument_id,date,updated_at) VALUES(?,?,?)",
+               (instrument_id, when, db.now_iso()))
+    return when
+
+
+def next_earnings(instrument_id: str) -> str | None:
+    """Next scheduled earnings date for a stock; refreshed from yfinance when older than a week."""
+    row = db.one("SELECT date, updated_at FROM upcoming_earnings WHERE instrument_id=?", (instrument_id,))
+    fresh = row and (pd.Timestamp.now(tz="UTC") - pd.Timestamp(row["updated_at"])).days < NEXT_EARNINGS_MAX_AGE_DAYS
+    if fresh and (row["date"] is None or row["date"] >= pd.Timestamp.now(tz="America/New_York").date().isoformat()):
+        return row["date"]
+    item = universe.get(instrument_id)
+    if not item or item.asset_class != "stock":
+        return None
+    try:
+        frame = yf.Ticker(item.provider_symbol).get_earnings_dates(limit=8)
+    except Exception as exc:
+        db.log("warn", "earnings", f"{item.symbol} next date: {exc}")
+        return row["date"] if row else None
+    if frame is None or frame.empty:
+        return None
+    return _store_next_earnings(instrument_id, frame)
 
 
 # ── Geopolitics (GDELT theme spikes) ─────────────────────────────────────────
