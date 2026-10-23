@@ -247,8 +247,16 @@ def propose_recommendation(**payload) -> dict:
     minimum = config.get_float("min_probability")
     if prob["expected_return"] <= 0 or prob["probability"] < minimum:
         reason = "negative expected value" if prob["expected_return"] <= 0 else f"below the {minimum:.0%} minimum"
-        raise ValueError(f"Not recorded ({reason}): {prob['explanation']}. Try a different bracket only if the "
-                         "evidence supports it; otherwise say there is no trade.")
+        better = probability.best_bracket(item.id, direction, price, minimum, snapshot)
+        hint = (f" A bracket that would pass on {item.symbol}: stop {better['stop']:.4g} ({better['stop_pct']:.1%}), "
+                f"target {better['target']:.4g} ({better['target_pct']:.1%}), horizon {better['horizon_days']} sessions "
+                f"(probability {better['probability']:.0%}, expected value {better['expected_return']:+.2%} per trade). "
+                "Use it only if it still fits the thesis and invalidation."
+                if better else
+                f" No stop/target/horizon within the checklist's rules has positive expected value on {item.symbol} "
+                f"{direction} right now, so there is no trade here.")
+        raise ValueError(f"Not recorded ({reason}): {prob['explanation']}.{hint} The gate is expected value > 0 "
+                         f"and probability >= {minimum:.0%}; report it as such.")
     payload["probability"] = prob["probability"]
     payload["expected_return"] = prob["expected_return"]
     payload["base_probability"] = prob["base"]

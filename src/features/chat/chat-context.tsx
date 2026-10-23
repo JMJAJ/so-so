@@ -1,5 +1,13 @@
 import { useQueryClient } from "@tanstack/react-query";
-import { createContext, useCallback, useContext, useRef, useState, type ReactNode } from "react";
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
 
 import { api, streamChat } from "@/lib/api";
 import { useNav } from "@/lib/nav";
@@ -24,11 +32,28 @@ interface ChatControl {
 
 const ChatContext = createContext<ChatControl | null>(null);
 
+// The current conversation and whether the drawer is open survive a page refresh.
+const STORAGE_KEY = "nexus.chat";
+
+function remembered(): { conversationId: string | null; open: boolean } {
+  try {
+    const saved = JSON.parse(window.localStorage.getItem(STORAGE_KEY) ?? "{}") as {
+      conversationId?: string | null;
+      open?: boolean;
+    };
+    return { conversationId: saved.conversationId ?? null, open: Boolean(saved.open) };
+  } catch {
+    return { conversationId: null, open: false };
+  }
+}
+
 export function ChatProvider({ children }: { children: ReactNode }) {
   const client = useQueryClient();
   const { view } = useNav();
-  const [open, setOpen] = useState(false);
-  const [conversationId, setConversationId] = useState<string | null>(null);
+  const [open, setOpen] = useState(() => remembered().open);
+  const [conversationId, setConversationId] = useState<string | null>(
+    () => remembered().conversationId,
+  );
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
@@ -46,6 +71,26 @@ export function ChatProvider({ children }: { children: ReactNode }) {
   const reset = useCallback(() => {
     setConversationId(null);
     setMessages([]);
+  }, []);
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(STORAGE_KEY, JSON.stringify({ conversationId, open }));
+    } catch {
+      // Storage blocked (private window): the chat just won't survive a refresh.
+    }
+  }, [conversationId, open]);
+
+  // After a refresh, reload the remembered conversation once.
+  useEffect(() => {
+    const id = remembered().conversationId;
+    if (!id) return;
+    api
+      .conversation(id)
+      .then((data) => {
+        if (!busyRef.current && conversationRef.current === id) setMessages(data.messages);
+      })
+      .catch(() => setConversationId(null)); // deleted or from another database
   }, []);
 
   const send = useCallback(

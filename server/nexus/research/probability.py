@@ -186,3 +186,40 @@ def evidence_probability(instrument_id: str, direction: str, horizon_days: int, 
             + f". Expected value {ev:+.2%} per trade"
         ),
     }
+
+
+STOP_ATR = (1.5, 2.0, 3.0)
+REWARD_RISK = (1.5, 2.0, 3.0)
+BRACKET_HORIZONS = (10, 20)
+
+
+def best_bracket(instrument_id: str, direction: str, price: float, minimum: float,
+                 snapshot: dict | None = None) -> dict | None:
+    """The stop/target/horizon (within the checklist's rules: stop 1.5-3x ATR, reward/risk >= 1.5)
+    with the highest historical expected value for this instrument and direction, if any passes
+    the same EV > 0 and minimum-probability gate. None when no such bracket exists."""
+    item = universe.require(instrument_id)
+    frame, _ = _ohlc(item)
+    if frame.empty or len(frame) < 60:
+        return None
+    tr = pd.concat([frame["high"] - frame["low"], (frame["high"] - frame["close"].shift()).abs(),
+                    (frame["low"] - frame["close"].shift()).abs()], axis=1).max(axis=1)
+    atr_pct = float(tr.tail(14).mean() / frame["close"].iloc[-1])
+    if not atr_pct or np.isnan(atr_pct):
+        return None
+    scored = []
+    for k in STOP_ATR:
+        for rr in REWARD_RISK:
+            for horizon in BRACKET_HORIZONS:
+                stop_pct, target_pct = k * atr_pct, k * atr_pct * rr
+                sim = simulate_bracket(frame, direction, horizon, stop_pct, target_pct)
+                ev = sim["p_win"] * sim["avg_win"] - (1 - sim["p_win"]) * sim["avg_loss"]
+                scored.append((ev, stop_pct, target_pct, horizon))
+    for _ev, stop_pct, target_pct, horizon in sorted(scored, reverse=True)[:3]:
+        prob = evidence_probability(instrument_id, direction, horizon, stop_pct, target_pct, snapshot)
+        if prob["expected_return"] > 0 and prob["probability"] >= minimum:
+            sign = -1 if direction == "long" else 1
+            return {"stop": round(price * (1 + sign * stop_pct), 4), "target": round(price * (1 - sign * target_pct), 4),
+                    "horizon_days": horizon, "stop_pct": stop_pct, "target_pct": target_pct,
+                    "probability": prob["probability"], "expected_return": prob["expected_return"]}
+    return None

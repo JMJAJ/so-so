@@ -171,3 +171,13 @@ def test_market_hours_follow_dst_holidays_and_breaks():
     nyse = markets.status(markets.BY_ID["nyse"], at("2026-10-21T10:30"))
     assert nyse["phase"] == "pre-market" and nyse["opens_at"] == "2026-10-21T13:30+00:00"
     assert markets.status(markets.BY_ID["sse"], at("2026-10-21T04:00"))["phase"] == "lunch break"
+
+
+def test_best_bracket_respects_the_gate(synthetic):
+    price = data.closes()["etf:gld"].dropna().iloc[-1]
+    best = probability.best_bracket("etf:gld", "long", price, 0.40)
+    if best is not None:  # synthetic random walks may have no passing bracket at all
+        assert best["expected_return"] > 0 and best["probability"] >= 0.40
+        assert best["stop"] < price < best["target"]
+        assert best["target_pct"] >= 1.5 * best["stop_pct"] - 1e-9
+    assert probability.best_bracket("etf:gld", "long", price, 0.99) is None
