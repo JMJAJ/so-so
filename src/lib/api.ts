@@ -106,6 +106,13 @@ export const api = {
   recommendations: (status?: string) =>
     fetchJson<Recommendation[]>(`/recommendations${qs({ status })}`),
   recommendation: (id: string) => fetchJson<Recommendation>(`/recommendations/${id}`),
+  tradeRecommendation: (id: string) =>
+    fetchJson<Recommendation>(`/recommendations/${id}/trade`, send("POST")),
+  resetPaper: (startingEquity?: number) =>
+    fetchJson<{ closed_positions: number; closed_calls: number; equity: number }>(
+      "/paper/reset",
+      send("POST", { starting_equity: startingEquity ?? null }),
+    ),
   cancelRecommendation: (id: string) =>
     fetchJson<Recommendation>(`/recommendations/${id}/cancel`, send("POST")),
   createRecommendation: (body: Record<string, unknown>) =>

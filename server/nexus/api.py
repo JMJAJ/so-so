@@ -387,6 +387,22 @@ def create_recommendation(body: RecommendationIn):
     return clean(recommendations.create(payload, source="manual", auto_trade=trade))
 
 
+class ResetIn(BaseModel):
+    starting_equity: float | None = None
+
+
+@app.post("/api/paper/reset")
+def paper_reset(body: ResetIn):
+    if body.starting_equity is not None and not 100 <= body.starting_equity <= 1_000_000_000:
+        raise ValueError("Starting money must be between $100 and $1,000,000,000")
+    return clean(paper.reset_account(body.starting_equity))
+
+
+@app.post("/api/recommendations/{rec_id}/trade")
+def trade_recommendation(rec_id: str):
+    return clean(recommendations.trade(rec_id))
+
+
 @app.post("/api/recommendations/{rec_id}/cancel")
 def cancel_recommendation(rec_id: str):
     return clean(recommendations.cancel(rec_id))
@@ -399,7 +415,8 @@ def portfolio():
         "equity_curve": paper.equity_curve(),
         "trades": [
             {**row, "symbol": (universe.get(row["instrument_id"]) or universe.require("etf:spy")).symbol}
-            for row in db.rows("SELECT * FROM trades ORDER BY closed_at DESC LIMIT 200")
+            for row in db.rows("SELECT * FROM trades WHERE closed_at > ? ORDER BY closed_at DESC LIMIT 200",
+                               (config.get("account_started_at"),))
         ],
     })
 
@@ -602,6 +619,7 @@ def get_settings():
 
 @app.put("/api/settings")
 def put_settings(body: SettingsIn):
+    body.values.pop("account_started_at", None)  # only a reset sets it; a stale form must not undo one
     if "starting_equity" in body.values:
         try:
             amount = float(str(body.values["starting_equity"]).replace(",", "").replace("$", ""))

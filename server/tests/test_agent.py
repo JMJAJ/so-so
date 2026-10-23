@@ -264,7 +264,7 @@ def test_skills_catalog_and_load():
     names = {s["name"] for s in skills.catalog()}
     assert {"pre-trade-checklist", "position-review", "news-triage", "post-mortem", "event-playbook"} <= names
     text, is_error = tools.call("load_skill", {"name": "pre-trade-checklist"})
-    assert not is_error and json.loads(text)["skill"] == "pre-trade-checklist@1"
+    assert not is_error and json.loads(text)["skill"] == "pre-trade-checklist@2"
     assert tools.call("load_skill", {"name": "nope"})[1]
     assert "pre-trade-checklist" in skills.prompt_section()
 
@@ -278,7 +278,7 @@ def test_skills_loaded_in_chat_are_recorded_and_tracked(synthetic, favourable, m
     monkeypatch.setattr(llm, "create", lambda kind="main": provider)
     chat.send(None, "/recommend NVDA")
     rec = db.one("SELECT id, skills FROM recommendations")
-    assert json.loads(rec["skills"]) == ["pre-trade-checklist@1"]
+    assert json.loads(rec["skills"]) == ["pre-trade-checklist@2"]
     # Close it early through the tool; holding is scored once the path resolves.
     text, is_error = tools.call("close_recommendation", {"recommendation_id": rec["id"],
                                                          "reason": "Invalidation hit: closed below the 50-day average"},
@@ -290,7 +290,7 @@ def test_skills_loaded_in_chat_are_recorded_and_tracked(synthetic, favourable, m
     db.execute("UPDATE recommendations SET expires_at='2000-01-01T00:00:00+00:00', created_at='2020-01-01T00:00:00+00:00'")
     assert recommendations.score_early_closes() == 1
     record = recommendations.track_record()
-    assert record["by_skill"]["pre-trade-checklist@1"]["n"] == 1
+    assert record["by_skill"]["pre-trade-checklist@2"]["n"] == 1
     assert record["early_closes"]["scored"] == 1 and record["early_closes"]["avg_saved"] is not None
 
 

@@ -63,6 +63,16 @@ function SettingsForm() {
     },
     onError: (error: Error) => toast.error(error.message),
   });
+  const reset = useMutation({
+    mutationFn: () => api.resetPaper(Number(values.starting_equity) || undefined),
+    onSuccess: (result) => {
+      toast.success(
+        `Paper account reset to $${result.equity.toLocaleString()}: closed ${result.closed_positions} positions and ${result.closed_calls} calls`,
+      );
+      void client.invalidateQueries();
+    },
+    onError: (error: Error) => toast.error(error.message),
+  });
   const test = useMutation({
     mutationFn: api.testLlm,
     onSuccess: (result) =>
@@ -205,6 +215,22 @@ function SettingsForm() {
               value={values.starting_equity ?? ""}
               onChange={(e) => set("starting_equity", e.target.value)}
             />
+            <button
+              type="button"
+              className="secondary-button mt-2 !px-2 !py-1 hover:!border-bear hover:!text-bear"
+              disabled={reset.isPending}
+              onClick={() => {
+                const amount = Number(values.starting_equity);
+                if (
+                  window.confirm(
+                    `Reset the paper account to $${amount.toLocaleString()}? Every open position and call is closed at the current price (kept in the track record as "reset"), and the portfolio starts over.`,
+                  )
+                )
+                  reset.mutate();
+              }}
+            >
+              {reset.isPending ? "Resetting…" : "Reset paper account to this amount"}
+            </button>
           </Field>
           <Field label="Risk per trade" hint="Fraction of equity lost if the stop is hit">
             <input

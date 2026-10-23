@@ -99,6 +99,8 @@ export interface Recommendation {
   mark_price: number | null;
   mark_return: number | null;
   trade_note?: string;
+  /** Whether the call has a live paper position (false: tracked only). */
+  traded?: boolean;
   /** Skills loaded when the call was made / closed early, as "name@version". */
   skills?: string[];
   close_skills?: string[];

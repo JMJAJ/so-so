@@ -187,7 +187,7 @@ def list_recommendations(status: str = "open") -> dict:
     return {"rows": [{k: r.get(k) for k in ("id", "symbol", "direction", "horizon_days", "entry_price", "stop", "target",
                                             "probability", "confidence", "status", "mark_return", "realized_return",
                                             "excess_return", "created_at", "expires_at", "thesis", "invalidation",
-                                            "skills", "lesson")}
+                                            "skills", "lesson", "traded")}
                      for r in recommendations.list_recs(status if status != "all" else None, 50)]}
 
 

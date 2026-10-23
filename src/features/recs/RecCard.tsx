@@ -23,6 +23,15 @@ export function RecCard({ rec, compact = false }: { rec: Recommendation; compact
     },
     onError: (error: Error) => toast.error(error.message),
   });
+  const trade = useMutation({
+    mutationFn: () => api.tradeRecommendation(rec.id),
+    onSuccess: () => {
+      toast.success(`Paper order placed for ${rec.symbol}`);
+      void client.invalidateQueries();
+    },
+    onError: (error: Error) => toast.error(error.message),
+  });
+  const untraded = rec.status === "open" && rec.traded === false;
   const ret = rec.status === "closed" ? rec.realized_return : rec.mark_return;
   const risk = Math.abs(rec.entry_price - rec.stop);
   const reward = Math.abs(rec.target - rec.entry_price);
@@ -138,8 +147,23 @@ export function RecCard({ rec, compact = false }: { rec: Recommendation; compact
       <div className="flex flex-wrap items-center gap-2 border-t border-border/60 px-3 py-1.5 text-[10px] text-muted-foreground">
         <span>
           {rec.source} · {ago(rec.created_at)}
-          {rec.position_id ? " · paper position" : ""}
+          {rec.traded ? " · paper position" : ""}
+          {untraded && (
+            <span className="text-amber">
+              {" "}
+              · not traded{rec.trade_note ? ` (${rec.trade_note})` : ""}
+            </span>
+          )}
         </span>
+        {untraded && (
+          <button
+            className="secondary-button !px-2 !py-0.5"
+            disabled={trade.isPending}
+            onClick={() => trade.mutate()}
+          >
+            {trade.isPending ? "Placing…" : "Trade it"}
+          </button>
+        )}
         <span className="ml-auto flex gap-1">
           <button
             className="icon-button !p-1"

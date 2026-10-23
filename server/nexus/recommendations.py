@@ -56,8 +56,12 @@ def create(payload: dict, *, source: str, run_id: str | None = None, signal_snap
     item = universe.require(str(payload.get("instrument_id") or payload.get("symbol") or ""))
     if not item.tradable:
         raise ValueError(f"{item.symbol} is research-only")
-    if db.one("SELECT 1 FROM recommendations WHERE instrument_id=? AND status='open'", (item.id,)):
-        raise ValueError(f"There is already an open recommendation on {item.symbol}")
+    existing = db.one("SELECT * FROM recommendations WHERE instrument_id=? AND status='open'", (item.id,))
+    if existing:
+        if traded(existing):
+            raise ValueError(f"There is already an open recommendation on {item.symbol} with a paper position")
+        # A call that never got a paper position (or whose position is gone) is replaced.
+        _close(_public(existing), quote_price(item.id) or existing["entry_price"], "superseded")
     quote = prices.quote(item.id)
     if not quote or quote["price"] is None:
         raise ValueError(f"No price for {item.symbol}")
@@ -96,6 +100,38 @@ def create(payload: dict, *, source: str, run_id: str | None = None, signal_snap
     return rec
 
 
+def traded(rec: dict) -> bool:
+    """Whether the call has a live paper position (pending or open)."""
+    return bool(rec.get("position_id")) and bool(db.one("SELECT 1 FROM positions WHERE id=?", (rec["position_id"],)))
+
+
+def quote_price(instrument_id: str) -> float | None:
+    quote = prices.quote(instrument_id)
+    return quote["price"] if quote and quote["price"] is not None else None
+
+
+def close_all_open(reason: str) -> int:
+    count = 0
+    for rec in list_recs("open", 5000):
+        _close(rec, quote_price(rec["instrument_id"]) or rec.get("mark_price") or rec["entry_price"], reason)
+        count += 1
+    return count
+
+
+def trade(rec_id: str) -> dict:
+    """Open a paper position for an open call that doesn't have one."""
+    rec = get(rec_id)
+    if rec["status"] != "open":
+        raise ValueError(f"{rec['symbol']} call is {rec['status']}")
+    if traded(rec):
+        raise ValueError(f"{rec['symbol']} already has a paper position")
+    position = paper.open_position(rec["instrument_id"], rec["direction"], stop=rec["stop"], target=rec["target"],
+                                   expires_at=rec["expires_at"], recommendation_id=rec_id, source="manual")
+    db.execute("UPDATE recommendations SET position_id=? WHERE id=?", (position["id"], rec_id))
+    live.publish("recommendations")
+    return get(rec_id)
+
+
 def _public(row: dict) -> dict:
     item = universe.get(row["instrument_id"])
     out = dict(row)
@@ -104,6 +140,7 @@ def _public(row: dict) -> dict:
     out["symbol"] = item.symbol if item else row["instrument_id"]
     out["name"] = item.name if item else ""
     out["asset_class"] = item.asset_class if item else ""
+    out["traded"] = traded(row)
     return out
 
 

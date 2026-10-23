@@ -31,6 +31,8 @@ DEFAULTS: dict[str, str] = {
     "llm_base_url": "",
     "autopilot": "true",
     "starting_equity": "100000",
+    # Set by a paper-account reset: trades and equity history before it don't count.
+    "account_started_at": "",
     "risk_per_trade": "0.01",
     "max_positions": "12",
     "max_exposure": "1.0",

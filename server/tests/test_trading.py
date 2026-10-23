@@ -115,3 +115,36 @@ def test_small_accounts_get_fractional_shares(synthetic):
     assert whole == int(whole) and whole > 1
     assert 0 < small < 1  # one share would cost more than the account's position cap
     assert paper.portfolio()["starting_equity"] == 2000
+
+
+def _call(instrument_id: str, auto_trade: bool) -> dict:
+    price = db.one("SELECT close FROM bars WHERE instrument_id=? ORDER BY date DESC LIMIT 1", (instrument_id,))["close"]
+    return recommendations.create(
+        {"instrument_id": instrument_id, "direction": "long", "horizon_days": 20, "stop": price * 0.94,
+         "target": price * 1.1, "probability": 0.55, "confidence": "low",
+         "thesis": "Synthetic thesis long enough to be valid.", "evidence": [{"type": "analogs", "summary": "x"}]},
+        source="test", auto_trade=auto_trade)
+
+
+def test_untraded_call_is_replaced_not_blocking(synthetic):
+    old = _call("stock:aapl", auto_trade=False)
+    assert old["traded"] is False
+    new = _call("stock:aapl", auto_trade=False)
+    assert recommendations.get(old["id"])["exit_reason"] == "superseded" and new["status"] == "open"
+    traded = recommendations.trade(new["id"])
+    assert traded["traded"] is True
+    with pytest.raises(ValueError, match="paper position"):
+        _call("stock:aapl", auto_trade=False)
+
+
+def test_reset_starts_a_clean_account(synthetic):
+    _call("stock:msft", auto_trade=True)
+    _call("stock:jpm", auto_trade=False)
+    assert paper.portfolio()["open_count"] + paper.portfolio()["pending_count"] == 1
+    result = paper.reset_account(983)
+    assert result["closed_positions"] == 1 and result["closed_calls"] == 2
+    state = paper.portfolio()
+    assert state["equity"] == pytest.approx(983) and state["trade_count"] == 0 and not state["positions"]
+    assert recommendations.list_recs("open") == []
+    assert {r["exit_reason"] for r in recommendations.list_recs("closed")} == {"reset"}
+    assert len(paper.equity_curve()) == 1

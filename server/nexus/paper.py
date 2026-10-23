@@ -268,7 +268,8 @@ def _exit_check(position: dict, quote: dict | None) -> tuple[str | None, float |
 def portfolio(*, mark: bool = True) -> dict:
     start = config.get_float("starting_equity")
     positions = db.rows("SELECT * FROM positions ORDER BY created_at DESC")
-    realized = db.one("SELECT COALESCE(SUM(net_pnl),0) v FROM trades")["v"]
+    since = config.get("account_started_at")
+    realized = db.one("SELECT COALESCE(SUM(net_pnl),0) v FROM trades WHERE closed_at > ?", (since,))["v"]
     quote_map = prices.quotes([row["instrument_id"] for row in positions]) if (mark and positions) else {}
     unrealized = exposure = 0.0
     out_positions = []
@@ -290,7 +291,7 @@ def portfolio(*, mark: bool = True) -> dict:
             "quote_as_of": quote.get("as_of") if quote else None,
         })
     equity = start + realized + unrealized
-    trades = db.rows("SELECT net_pnl FROM trades")
+    trades = db.rows("SELECT net_pnl FROM trades WHERE closed_at > ?", (since,))
     wins = [t["net_pnl"] for t in trades if t["net_pnl"] > 0]
     losses = [t["net_pnl"] for t in trades if t["net_pnl"] < 0]
     return {
@@ -315,7 +316,8 @@ def snapshot_equity() -> None:
 
 
 def equity_curve() -> list[dict]:
-    rows = db.rows("SELECT * FROM equity_snapshots ORDER BY date")
+    rows = db.rows("SELECT * FROM equity_snapshots WHERE date >= ? ORDER BY date",
+                   (config.get("account_started_at")[:10],))
     if not rows:
         return []
     base_equity, base_spy = rows[0]["equity"], rows[0]["spy_close"]
@@ -324,6 +326,32 @@ def equity_curve() -> list[dict]:
         "return_pct": (row["equity"] / base_equity - 1) * 100,
         "spy_return_pct": ((row["spy_close"] / base_spy - 1) * 100) if (row["spy_close"] and base_spy) else None,
     } for row in rows]
+
+
+def reset_account(starting_equity: float | None = None) -> dict:
+    """Start the paper account over: close every position and open call at the current price
+    (exit reason 'reset', so the track record keeps them), then count only what comes after."""
+    from . import recommendations
+
+    closed_positions = 0
+    for position in db.rows("SELECT id FROM positions"):
+        try:
+            close_position(position["id"], reason="reset")
+            closed_positions += 1
+        except (KeyError, ValueError) as exc:
+            db.execute("DELETE FROM positions WHERE id=?", (position["id"],))
+            db.log("warn", "reset", f"{position['id']}: removed without a fill ({exc})")
+    closed_calls = recommendations.close_all_open("reset")
+    values = {"account_started_at": db.now_iso()}
+    if starting_equity is not None:
+        values["starting_equity"] = str(starting_equity)
+    config.set_many(values)
+    db.execute("DELETE FROM equity_snapshots WHERE date >= ?", (db.today(),))
+    snapshot_equity()
+    db.log("info", "reset", f"Paper account reset: {closed_positions} positions and {closed_calls} calls closed")
+    live.publish("portfolio")
+    live.publish("recommendations")
+    return {"closed_positions": closed_positions, "closed_calls": closed_calls, **portfolio(mark=False)}
 
 
 def expiry_from_now(horizon_days: int) -> str:
