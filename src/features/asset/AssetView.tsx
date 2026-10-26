@@ -6,6 +6,7 @@ import { FanChart } from "@/features/charts/svg";
 import { useChat } from "@/features/chat/chat-context";
 import { AiCallCard, EvidenceSteps } from "@/features/recs/AiCallCard";
 import { RecCard } from "@/features/recs/RecCard";
+import { AssetSimulationPanel } from "@/features/sim/SimPanels";
 import { HeadlinesPanel } from "@/features/today/TodayView";
 import {
   Badge,
@@ -231,74 +232,79 @@ function AssetBody({
         {item.tradable && <MarketChip marketId={item.market} detail className="pb-1" />}
       </div>
 
-      <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_380px]">
-        <Panel
-          title={span ? "Live price" : "Price & events"}
-          subtitle={
-            span
-              ? "Intraday candles in your time, pre- and after-market included. Dashed lines: the open AI call's entry, stop and target."
-              : "Arrows: this asset's earnings beats and misses. Dots (toggle): macro and market events. AI calls are marked on the day they were made."
-          }
-          actions={
-            <>
-              {!span && (
-                <button
-                  className={cn(
-                    "secondary-button !min-h-9",
-                    showMacro && "!border-[#1f3a27] !text-bull",
-                  )}
-                  onClick={() => setShowMacro((v) => !v)}
-                >
-                  Macro events
-                </button>
-              )}
-              <div
-                role="tablist"
-                aria-label="Chart range"
-                className="flex gap-0.5 rounded-xl border border-border bg-input p-1"
-              >
-                {ranges.map((range) => (
+      {/* Columns size to their own content (no stretching), so the chart panel never grows
+          empty space to match the taller right column; the simulation fills the left one. */}
+      <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_380px] xl:items-start">
+        <div className="flex min-w-0 flex-col gap-4">
+          <Panel
+            title={span ? "Live price" : "Price & events"}
+            subtitle={
+              span
+                ? "Intraday candles in your time, pre- and after-market included. Dashed lines: the open AI call's entry, stop and target."
+                : "Arrows: this asset's earnings beats and misses. Dots (toggle): macro and market events. AI calls are marked on the day they were made."
+            }
+            actions={
+              <>
+                {!span && (
                   <button
-                    key={range.key}
-                    role="tab"
-                    aria-selected={range.active}
-                    onClick={range.pick}
                     className={cn(
-                      "min-h-8 rounded-lg px-2.5 text-xs font-semibold",
-                      range.active
-                        ? "bg-accent text-foreground"
-                        : "text-muted-foreground hover:text-foreground",
+                      "secondary-button !min-h-9",
+                      showMacro && "!border-[#1f3a27] !text-bull",
                     )}
+                    onClick={() => setShowMacro((v) => !v)}
                   >
-                    {range.label}
+                    Macro events
                   </button>
-                ))}
-              </div>
-            </>
-          }
-          bodyClassName="p-3"
-        >
-          {span ? (
-            <Suspense fallback={<Loading />}>
-              <IntradayChart
-                instrumentId={item.id}
-                span={span}
-                recommendations={data.recommendations}
-              />
-            </Suspense>
-          ) : data.bars.length ? (
-            <Suspense fallback={<Loading />}>
-              <CandleChart
-                bars={data.bars}
-                events={data.events}
-                recommendations={data.recommendations}
-                showMacro={showMacro}
-              />
-            </Suspense>
-          ) : (
-            <Empty title="No price history" />
-          )}
-        </Panel>
+                )}
+                <div
+                  role="tablist"
+                  aria-label="Chart range"
+                  className="flex gap-0.5 rounded-xl border border-border bg-input p-1"
+                >
+                  {ranges.map((range) => (
+                    <button
+                      key={range.key}
+                      role="tab"
+                      aria-selected={range.active}
+                      onClick={range.pick}
+                      className={cn(
+                        "min-h-8 rounded-lg px-2.5 text-xs font-semibold",
+                        range.active
+                          ? "bg-accent text-foreground"
+                          : "text-muted-foreground hover:text-foreground",
+                      )}
+                    >
+                      {range.label}
+                    </button>
+                  ))}
+                </div>
+              </>
+            }
+            bodyClassName="p-3"
+          >
+            {span ? (
+              <Suspense fallback={<Loading />}>
+                <IntradayChart
+                  instrumentId={item.id}
+                  span={span}
+                  recommendations={data.recommendations}
+                />
+              </Suspense>
+            ) : data.bars.length ? (
+              <Suspense fallback={<Loading />}>
+                <CandleChart
+                  bars={data.bars}
+                  events={data.events}
+                  recommendations={data.recommendations}
+                  showMacro={showMacro}
+                />
+              </Suspense>
+            ) : (
+              <Empty title="No price history" />
+            )}
+          </Panel>
+          <AssetSimulationPanel instrumentId={item.id} symbol={item.symbol} />
+        </div>
 
         <div className="flex min-w-0 flex-col gap-4">
           {item.tradable && <AiCallCard rec={openCall} symbol={item.symbol} />}

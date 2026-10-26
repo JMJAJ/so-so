@@ -10,7 +10,7 @@ from typing import Callable
 
 from . import config, data, db, live, nlp, paper, recommendations, snapshot, universe
 from .ingest import events, gdelt, macro, news, prices
-from .research import backtest, event_study, replay, scan
+from .research import backtest, event_study, replay, scan, simulate
 
 _running: set[str] = set()
 _progress: dict[str, str] = {}
@@ -76,9 +76,15 @@ def job_research(progress) -> dict:
     result["models"] = {k: {"has_edge": v.get("has_edge"), "oos_ic": (v.get("walk_forward") or {}).get("ic")}
                         for k, v in bt["classes"].items()}
     result["replay"] = {k: replay.run(progress=progress).get(k) for k in ("calls", "hit_rate", "brier")}
+    result["sim_check"] = (simulate.check(progress=progress).get("overall") or {}).get("in80")
     data.invalidate()
     scan.forecasts(refresh=True)
     return result
+
+
+def job_sim_check(progress) -> dict:
+    overall = simulate.check(progress=progress).get("overall") or {}
+    return {k: overall.get(k) for k in ("n", "in80", "in50", "verdict")}
 
 
 def job_analyst(progress) -> dict:
@@ -137,6 +143,7 @@ JOBS: dict[str, tuple[Callable, str]] = {
     "analyst": (job_analyst, "AI research run that writes recommendations"),
     "news_backfill": (job_news_backfill, "A year of company news + 3 months of GDELT headlines, deduped, classified"),
     "gdelt_backfill": (job_gdelt_backfill, "Backfill GDELT geopolitical history"),
+    "sim_check": (job_sim_check, "Simulation honesty check: replay the price simulator on past dates"),
 }
 
 

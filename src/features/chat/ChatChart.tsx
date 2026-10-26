@@ -31,7 +31,9 @@ export const ChatChart = memo(function ChatChart({ chart }: { chart: ChatChartDa
           markers={chart.markers}
         />
       )}
-      {chart.kind === "fan" && <FanChart fan={chart.fan} horizon={chart.horizon} />}
+      {chart.kind === "fan" && (
+        <FanChart fan={chart.fan} horizon={chart.horizon} levels={chart.levels} />
+      )}
       {chart.kind === "bar" && (
         <BarChart
           bars={chart.bars}

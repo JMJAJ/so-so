@@ -20,7 +20,7 @@ from pydantic import BaseModel
 from . import accounts, auth, config, data, db, jobs, keepalive, live, llm, markets, nlp, paper, recommendations, snapshot, universe
 from .agent import analyst, chat, tools
 from .ingest import prices
-from .research import analogs, backtest, correlation, event_study, probability, replay, scan
+from .research import analogs, backtest, correlation, event_study, probability, replay, scan, simulate
 from .research.features import asset_features, regime_frame, regime_label
 from .taxonomy import EVENT_TYPES, NEWS_CATEGORIES, label
 
@@ -321,6 +321,15 @@ def asset(instrument: str, years: float = Query(2.0, ge=0.25, le=10)):
     })
 
 
+@app.get("/api/assets/{instrument}/simulate")
+def asset_simulate(instrument: str, horizon: int = Query(20, ge=1, le=60), similar: bool = False):
+    item = universe.require(instrument)
+    # Same inputs give the same paths for a while, so revisits and the live refresh don't redraw a new fan.
+    seed = int(time.time() // 900)
+    return clean(data._cached(("simulate", item.id, horizon, similar, seed),
+                              lambda: simulate.asset(item.id, horizon, analog=similar, seed=seed)))
+
+
 @app.get("/api/assets/{instrument}/event-study")
 def asset_event_study(instrument: str, event_type: str):
     item = universe.require(instrument)
@@ -474,6 +483,29 @@ def portfolio():
                                "LIMIT 200", (accounts.current(), accounts.get()["started_at"]))
         ],
     })
+
+
+@app.get("/api/portfolio/simulate")
+def portfolio_simulate(horizon: int = Query(20, ge=1, le=60)):
+    return clean(simulate.portfolio(horizon, seed=int(time.time() // 900)))
+
+
+@app.get("/api/scenarios")
+def scenario_presets():
+    return {"presets": simulate.PRESETS, "event_types": sorted(EVENT_TYPES)}
+
+
+@app.get("/api/scenario")
+def scenario(driver: str, move: float | None = None, window: int = Query(5, ge=1, le=60),
+             horizon: int = Query(20, ge=1, le=60)):
+    if driver not in EVENT_TYPES:
+        driver = universe.require(driver).id
+    return clean(simulate.scenario(driver, move, window, horizon))
+
+
+@app.get("/api/simulation/check")
+def simulation_check(horizon: int = Query(20, ge=1, le=60)):
+    return clean(simulate.summary(horizon))
 
 
 @app.post("/api/positions/{position_id}/close")

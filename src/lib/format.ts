@@ -22,12 +22,13 @@ export function price(value: number | null | undefined): string {
   });
 }
 
-export function money(value: number | null | undefined, signed = false): string {
+export function money(value: number | null | undefined, signed = false, digits = 0): string {
   if (value == null || Number.isNaN(value)) return "—";
   const text = Math.abs(value).toLocaleString("en-US", {
     style: "currency",
     currency: "USD",
-    maximumFractionDigits: 0,
+    minimumFractionDigits: digits,
+    maximumFractionDigits: digits,
   });
   if (!signed) return value < 0 ? `-${text}` : text;
   return `${value > 0 ? "+" : value < 0 ? "-" : ""}${text}`;

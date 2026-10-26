@@ -226,6 +226,18 @@ CREATE TABLE IF NOT EXISTS accounts (
     created_at TEXT NOT NULL
 );
 
+-- Simulation honesty check: the simulator run on past dates (data <= date only), with the
+-- final-day band it gave and what actually happened (research/simulate.py).
+CREATE TABLE IF NOT EXISTS sim_checks (
+    instrument_id TEXT NOT NULL,
+    date TEXT NOT NULL,
+    horizon INTEGER NOT NULL,
+    p10 REAL, p25 REAL, p50 REAL, p75 REAL, p90 REAL,
+    p_up REAL,
+    realized REAL NOT NULL,
+    PRIMARY KEY (instrument_id, date, horizon)
+) WITHOUT ROWID;
+
 CREATE TABLE IF NOT EXISTS settings (
     key TEXT PRIMARY KEY,
     value TEXT NOT NULL

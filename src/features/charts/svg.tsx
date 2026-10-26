@@ -16,19 +16,25 @@ function scale(domain: [number, number], range: [number, number]) {
   return (value: number) => r0 + ((value - d0) / span) * (r1 - r0);
 }
 
-/** Analog fan: percentile bands of forward paths after the most similar past states. */
+/** Percentile fan of forward paths (analogs or simulation). `levels` are returns to mark, e.g.
+ * a call's stop and target relative to today's price. */
 export function FanChart({
   fan,
   horizon,
+  levels = [],
+  height = 220,
+  label = "Forward return distribution after historical analogs",
 }: {
   fan: NonNullable<AnalogResult["fan"]>;
   horizon: number;
+  levels?: Array<{ label: string; value: number }>;
+  height?: number;
+  label?: string;
 }) {
   const width = 560;
-  const height = 220;
   const pad = { l: 44, r: 12, t: 12, b: 22 };
   const [hover, setHover] = useState<number | null>(null);
-  const values = fan.flatMap((row) => [row.p10, row.p90]);
+  const values = [...fan.flatMap((row) => [row.p10, row.p90]), ...levels.map((l) => l.value)];
   const y = scale([Math.min(...values, 0), Math.max(...values, 0)], [height - pad.b, pad.t]);
   const x = scale([0, fan.length - 1], [pad.l, width - pad.r]);
   const band = (lo: "p10" | "p25", hi: "p75" | "p90") =>
@@ -46,7 +52,7 @@ export function FanChart({
         viewBox={`0 0 ${width} ${height}`}
         className="w-full"
         role="img"
-        aria-label="Forward return distribution after historical analogs"
+        aria-label={label}
         onMouseLeave={() => setHover(null)}
         onMouseMove={(event) => {
           const box = event.currentTarget.getBoundingClientRect();
@@ -80,6 +86,27 @@ export function FanChart({
         <path d={band("p10", "p90")} fill={AMBER} opacity={0.1} />
         <path d={band("p25", "p75")} fill={AMBER} opacity={0.2} />
         <path d={median} fill="none" stroke={AMBER} strokeWidth={1.5} />
+        {levels.map((level) => (
+          <g key={level.label}>
+            <line
+              x1={pad.l}
+              x2={width - pad.r}
+              y1={y(level.value)}
+              y2={y(level.value)}
+              stroke={level.label === "stop" ? BEAR : BULL}
+              strokeDasharray="5 4"
+            />
+            <text
+              x={width - pad.r - 2}
+              y={y(level.value) - 4}
+              textAnchor="end"
+              fontSize="9"
+              fill={level.label === "stop" ? BEAR : BULL}
+            >
+              {level.label} {pct(level.value, 1)}
+            </text>
+          </g>
+        ))}
         <line
           x1={x(horizon)}
           x2={x(horizon)}

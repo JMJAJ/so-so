@@ -112,6 +112,7 @@ built from stored data, not from numbers the model types. Slash commands:
 |---|---|
 | `/invest [focus]` | Scan, investigate the strongest candidates, record the trades with real evidence (paper positions via autopilot), chart each one |
 | `/bypass <trade>` | Place your own paper trade, e.g. `/bypass short TSLA, stop 6%, target 15%, 2 weeks`. Skips the evidence gate and correlated-risk limit for that turn (in any account) and always opens the position; the computed odds are still recorded and shown. Missing stop/target/horizon default to 2x ATR, 2x the stop, 20 sessions |
+| `/simulate NVDA`, `/whatif oil +10%`, `/risk` | Simulated range of the next sessions (with the open call's stop/target odds), what markets and your positions did after a move or event, and a simulation of your whole paper account |
 | `/chart <anything>` | e.g. `/chart GLD vs SPY over 2 years`, `/chart what gold did after rate cuts` |
 | `/scan`, `/why NVDA`, `/recommend gold` | Rank candidates, review one asset, record a single call |
 | `/regime`, `/news`, `/backtest`, `/record`, `/portfolio` | Macro regime, headlines with history, model validation, track record, position review |

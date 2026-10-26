@@ -13,12 +13,12 @@ import numpy as np
 import pandas as pd
 
 from .. import data, db, paper, universe
-from ..research import analogs, event_study
+from ..research import analogs, event_study, simulate
 from ..taxonomy import label
 
 MAX_POINTS = 360
 MAX_COMPARE = 6
-KINDS = ("price", "compare", "analogs", "event_study", "equity", "bar")
+KINDS = ("price", "compare", "analogs", "event_study", "equity", "bar", "simulation", "portfolio_sim", "scenario")
 
 
 def _thin(series: pd.Series) -> pd.Series:
@@ -117,6 +117,54 @@ def _equity() -> tuple[dict, str]:
             f"Equity {state['equity']:,.2f} ({state['return_pct']:+.2f}%), {len(curve)} daily snapshots")
 
 
+def _check_note(check: dict | None) -> str:
+    if not check:
+        return "Simulator not yet checked on past dates."
+    return (f"Honesty check ({check['scope']}, n={check['n']}): {check['in80']:.0%} of past outcomes fell inside "
+            f"the 80% band, {check['in50']:.0%} inside the 50% band.")
+
+
+def _simulation(instrument: str, horizon: int) -> tuple[dict, str]:
+    sim = simulate.asset(universe.require(instrument).id, horizon)
+    last = sim["fan"][-1]
+    bracket = sim.get("bracket")
+    note = (f"{sim['paths']:,} simulated paths from {sim['method']['basis']} at today's volatility "
+            f"({sim['vol_now']:.0%} a year). Bands: 50% and 80% of paths. " + _check_note(sim.get("check")))
+    summary = (f"{sim['symbol']} next {sim['horizon']} sessions: median {last['p50']:+.1%}, 80% band "
+               f"{last['p10']:+.1%} to {last['p90']:+.1%}, P(up) {sim['p_up']:.0%}"
+               + (f"; bracket: target first {bracket['p_target']:.0%}, stop first {bracket['p_stop']:.0%}" if bracket else "")
+               + ". " + _check_note(sim.get("check")))
+    return ({"kind": "fan", "title": f"{sim['symbol']}: simulated next {sim['horizon']} sessions", "fan": sim["fan"],
+             "horizon": sim["horizon"], "levels": sim.get("levels", []), "note": note}, summary)
+
+
+def _portfolio_sim(horizon: int) -> tuple[dict, str]:
+    sim = simulate.portfolio(horizon)
+    if not sim.get("fan"):
+        raise ValueError(sim.get("note") or "Nothing to simulate")
+    last = sim["fan"][-1]
+    note = (f"Account value change over {sim['horizon']} sessions across {len(sim['positions'])} open positions "
+            f"(stops, targets and expiry applied). " + _check_note(sim.get("check")))
+    return ({"kind": "fan", "title": f"{sim['account']}: simulated account value", "fan": sim["fan"],
+             "horizon": sim["horizon"], "levels": [], "note": note},
+            f"{sim['account']} next {sim['horizon']} sessions: median {last['p50']:+.1%}, 80% band {last['p10']:+.1%} "
+            f"to {last['p90']:+.1%}, P(loss > 5%) {sim['p_loss_5pct']:.0%}, 5% worst case ${sim['var95']:,.2f}")
+
+
+def _scenario(driver: str, move: float | None, horizon: int) -> tuple[dict, str]:
+    if driver not in simulate.EVENT_TYPES:
+        driver = universe.require(driver).id
+    result = simulate.scenario(driver, move, 5, horizon)
+    rows = result["assets"][:12]
+    bars = [{"label": r["symbol"] + (" ●" if r["reliable"] else ""), "value": r["edge"],
+             "note": f"n={r['n']} t={r['t_stat']:.1f} up {r['hit_rate']:.0%}"} for r in rows]
+    return ({"kind": "bar", "title": f"{result['title']}: next {result['horizon']} sessions vs normal", "format": "pct",
+             "bars": bars, "note": f"{result['occurrences']} past occurrences. ● = reliable (FDR q <= 0.10, stable, "
+                                   "n >= 8); the rest is noise-sized."},
+            f"{result['title']}, {result['occurrences']} occurrences: "
+            + ", ".join(f"{r['symbol']} {r['edge']:+.1%}{' (reliable)' if r['reliable'] else ''}" for r in rows[:6]))
+
+
 def _bar(title: str, labels: list[str], values: list[float], value_format: str) -> tuple[dict, str]:
     if not labels or len(labels) != len(values):
         raise ValueError("bar needs labels and values of equal length")
@@ -127,7 +175,8 @@ def _bar(title: str, labels: list[str], values: list[float], value_format: str) 
 
 def show_chart(kind: str, instrument: str | None = None, instruments: list[str] | None = None,
                event_type: str | None = None, years: float = 1.0, title: str | None = None,
-               labels: list[str] | None = None, values: list[float] | None = None, value_format: str = "pct") -> dict:
+               labels: list[str] | None = None, values: list[float] | None = None, value_format: str = "pct",
+               horizon: int = 20, driver: str | None = None, move: float | None = None) -> dict:
     if kind == "price":
         chart, summary = _price(instrument or "", years)
     elif kind == "compare":
@@ -140,10 +189,18 @@ def show_chart(kind: str, instrument: str | None = None, instruments: list[str] 
         chart, summary = _event_study(event_type, instrument or "")
     elif kind == "equity":
         chart, summary = _equity()
+    elif kind == "simulation":
+        chart, summary = _simulation(instrument or "", horizon)
+    elif kind == "portfolio_sim":
+        chart, summary = _portfolio_sim(horizon)
+    elif kind == "scenario":
+        if not driver:
+            raise ValueError("scenario needs driver (and move for an instrument driver)")
+        chart, summary = _scenario(driver, move, horizon)
     elif kind == "bar":
         chart, summary = _bar(title or "", labels or [], values or [], value_format)
     else:
         raise ValueError(f"kind must be one of {', '.join(KINDS)}")
-    if title and kind != "bar":
+    if title and chart["kind"] != "bar":
         chart["title"] = title
     return {"chart": chart, "summary": f"Chart shown to the user. {summary}"}

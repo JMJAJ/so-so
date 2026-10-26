@@ -4,6 +4,7 @@ import { useState } from "react";
 import { CalibrationChart } from "@/features/charts/svg";
 import { RecCard } from "@/features/recs/RecCard";
 import { Markdown } from "@/features/shell/Markdown";
+import { SimCheckPanel } from "@/features/sim/SimPanels";
 import {
   Badge,
   Empty,
@@ -119,6 +120,8 @@ export default function TrackRecordView() {
       <SkillsPanel record={data} />
 
       <ReplayPanel record={data} />
+
+      <SimCheckPanel />
 
       <Panel
         title="Quant model validation"

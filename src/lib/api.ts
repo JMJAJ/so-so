@@ -1,5 +1,6 @@
 import type {
   AssetDetail,
+  AssetSimulation,
   Brief,
   ChatEvent,
   ChatMessage,
@@ -16,6 +17,10 @@ import type {
   PaperAccount,
   NewsItem,
   Portfolio,
+  PortfolioSimulation,
+  ScenarioPreset,
+  ScenarioResult,
+  SimCheckSummary,
   Recommendation,
   SkillInfo,
   Run,
@@ -132,6 +137,21 @@ export const api = {
   createRecommendation: (body: Record<string, unknown>) =>
     fetchJson<Recommendation>("/recommendations", send("POST", body)),
   portfolio: () => fetchJson<Portfolio>("/portfolio"),
+  simulateAsset: (id: string, horizon: number, similar: boolean) =>
+    fetchJson<AssetSimulation>(
+      `/assets/${encodeURIComponent(id)}/simulate?horizon=${horizon}&similar=${similar}`,
+    ),
+  simulatePortfolio: (horizon: number) =>
+    fetchJson<PortfolioSimulation>(`/portfolio/simulate?horizon=${horizon}`),
+  scenarioPresets: () =>
+    fetchJson<{ presets: ScenarioPreset[]; event_types: string[] }>("/scenarios"),
+  scenario: (driver: string, move: number | null, window: number, horizon: number) =>
+    fetchJson<ScenarioResult>(
+      `/scenario?driver=${encodeURIComponent(driver)}&window=${window}&horizon=${horizon}` +
+        (move != null ? `&move=${move}` : ""),
+    ),
+  simulationCheck: (horizon = 20) =>
+    fetchJson<SimCheckSummary>(`/simulation/check?horizon=${horizon}`),
   closePosition: (id: string) =>
     fetchJson<Record<string, unknown>>(`/positions/${id}/close`, send("POST")),
   trackRecord: () => fetchJson<TrackRecord>("/track-record"),

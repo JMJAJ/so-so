@@ -13,8 +13,8 @@ interface LiveEvent {
 /** Which cached queries each kind of change makes stale (by query-key prefix). */
 const TOPIC_KEYS: Record<string, string[]> = {
   quotes: ["portfolio", "dashboard", "asset", "intraday", "universe", "briefs"],
-  portfolio: ["portfolio", "dashboard", "status", "track-record", "accounts"],
-  recommendations: ["dashboard", "portfolio", "track-record", "briefs", "skills"],
+  portfolio: ["portfolio", "dashboard", "status", "track-record", "accounts", "portfolio-sim"],
+  recommendations: ["dashboard", "portfolio", "track-record", "briefs", "skills", "simulate"],
   news: ["news", "events", "dashboard", "status"],
   settings: ["settings", "status"],
   logs: ["logs"],
@@ -31,6 +31,7 @@ const JOB_KEYS: Record<string, string[]> = {
   news_backfill: ["news", "events", "dashboard"],
   monitor: ["portfolio", "dashboard"],
   gdelt_backfill: ["events"],
+  sim_check: ["sim-check", "simulate", "portfolio-sim"],
 };
 
 const DEBOUNCE_MS = 400;

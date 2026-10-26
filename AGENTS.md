@@ -28,6 +28,7 @@ The frontend is TanStack Start (React 19). The backend is a Python FastAPI packa
 | `server/nexus/research/probability.py` | Trade probability and expected value from a bracket simulation, reliable evidence and calibration |
 | `server/nexus/research/replay.py` | Point-in-time replay of the evidence engine (`replay_calls`); feeds calibration |
 | `server/nexus/research/analogs.py` | Nearest-neighbour historical states and forward paths |
+| `server/nexus/research/simulate.py` | Monte Carlo (filtered historical simulation): one asset, the whole account, what-if scenarios, and the honesty check (`sim_checks`) replayed on past dates |
 | `server/nexus/research/correlation.py` | Peers and lead-lag drivers |
 | `server/nexus/research/signals.py` | Signal panel (shared by backtest and live) and model application |
 | `server/nexus/research/backtest.py` | Walk-forward validation per asset class, with point-in-time signal selection |

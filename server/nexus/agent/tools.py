@@ -12,7 +12,7 @@ import pandas as pd
 
 from .. import accounts, config, data, db, nlp, paper, recommendations, universe
 from ..ingest import events, prices
-from ..research import analogs, backtest, correlation, event_study, probability, replay, scan
+from ..research import analogs, backtest, correlation, event_study, probability, replay, scan, simulate
 from ..research.features import asset_features, regime_frame, regime_label
 from ..taxonomy import EVENT_TYPES, NEWS_CATEGORIES
 from . import skills
@@ -139,6 +139,37 @@ def analogs_tool(instrument: str, horizon: int = 20) -> dict:
 def correlations_tool(instrument: str) -> dict:
     item = _inst(instrument)
     return _r({"peers": correlation.peers(item.id), "lead_lag_20d": correlation.lead_lag(item.id, 20)[:8]})
+
+
+def _fan_summary(fan: list[dict] | None, horizon: int) -> list[dict]:
+    days = sorted({d for d in (5, 10, 20, 40, horizon) if d <= horizon})
+    return [row for row in fan or [] if row["day"] in days]
+
+
+def simulate_tool(instrument: str, horizon: int = 20, similar_conditions: bool = False, direction: str | None = None,
+                  stop: float | None = None, target: float | None = None) -> dict:
+    item = _inst(instrument)
+    result = simulate.asset(item.id, int(horizon), analog=bool(similar_conditions), direction=direction,
+                            stop=stop, target=target)
+    result["fan"] = _fan_summary(result["fan"], result["horizon"])
+    result["reading"] = ("A range of plausible outcomes from history, not a forecast. Quote check.in80 (share of past "
+                         "outcomes inside the 80% band) with it. Show it with show_chart kind=simulation.")
+    return _r(result)
+
+
+def simulate_portfolio_tool(horizon: int = 20) -> dict:
+    result = simulate.portfolio(int(horizon))
+    result["fan"] = _fan_summary(result.get("fan"), result["horizon"])
+    return _r(result, 4)
+
+
+def scenario_tool(driver: str, move: float | None = None, window: int = 5, horizon: int = 20,
+                  instruments: list[str] | None = None) -> dict:
+    if driver not in EVENT_TYPES:
+        driver = _inst(driver).id
+    result = simulate.scenario(driver, move, int(window), int(horizon), instruments)
+    result["assets"] = result["assets"][:14]
+    return _r(result)
 
 
 def macro_regime() -> dict:
@@ -357,6 +388,40 @@ TOOLS: dict[str, dict] = {
         "description": "Most/least correlated assets and statistically significant lead-lag drivers (e.g. dollar, yields, oil, conflict-news intensity) of the instrument's next-20-session return.",
         "parameters": {"type": "object", "properties": {"instrument": _INSTR}, "required": ["instrument"]},
     },
+    "simulate": {
+        "fn": simulate_tool,
+        "description": "Monte Carlo of the instrument's next N sessions (4,000 paths stitched from its own history at "
+                       "today's volatility): percentile fan, P(up), typical drawdown, 5% worst case, and for a "
+                       "direction + stop/target (default: the open call's) the chance of hitting target or stop first. "
+                       "Includes the simulator's honesty check on past dates. A range, not a forecast.",
+        "parameters": {"type": "object", "properties": {
+            "instrument": _INSTR, "horizon": {"type": "integer", "minimum": 1, "maximum": 60},
+            "similar_conditions": {"type": "boolean", "description": "Use only history from the past setups most like today"},
+            "direction": {"type": "string", "enum": ["long", "short"]},
+            "stop": {"type": "number"}, "target": {"type": "number"}},
+            "required": ["instrument"]},
+    },
+    "simulate_portfolio": {
+        "fn": simulate_portfolio_tool,
+        "description": "Simulate every open paper position together (same historical days, so they co-move as they "
+                       "really do; stops, targets and expiry applied): range of account value, chance of losing "
+                       "more than 5%/10%, 5% worst case, and each position's share of the risk.",
+        "parameters": {"type": "object", "properties": {"horizon": {"type": "integer", "minimum": 1, "maximum": 60}}},
+    },
+    "scenario": {
+        "fn": scenario_tool,
+        "description": "What-if: what assets (and the open positions) did after past occurrences of a move in a driver "
+                       "(driver=WTI, move=0.10, window=5: oil +10% within 5 sessions; also VIX, DXY, SPY, BTC, any "
+                       "instrument) or of an event type (driver=rate_hike). Per asset: n, mean vs normal, hit rate, t, "
+                       "FDR q and a reliable flag. Only reliable rows are evidence.",
+        "parameters": {"type": "object", "properties": {
+            "driver": {"type": "string", "description": "Instrument (WTI, VIX, DXY, SPY, BTC…) or an event type"},
+            "move": {"type": "number", "description": "Fractional move for an instrument driver, e.g. -0.05"},
+            "window": {"type": "integer", "minimum": 1, "maximum": 60, "description": "Sessions the move happens within"},
+            "horizon": {"type": "integer", "minimum": 1, "maximum": 60},
+            "instruments": {"type": "array", "items": {"type": "string"}, "description": "Assets to measure (default: open positions + major markets)"}},
+            "required": ["driver"]},
+    },
     "macro_regime": {
         "fn": macro_regime,
         "description": "Current market regime (risk-on/off, VIX, curve, rates, dollar, credit, conflict intensity) and macro events of the last 3 weeks.",
@@ -403,10 +468,13 @@ TOOLS: dict[str, dict] = {
         "description": "Display a chart to the user in the chat, built from stored data. Use it whenever a picture helps: "
                        "price (one instrument, with event markers and any open call's entry/stop/target), compare (2-6 "
                        "instruments, % return), analogs (fan of forward paths after similar setups), event_study (avg "
-                       "return by horizon after an event type), equity (paper account vs S&P 500), or bar (your own "
+                       "return by horizon after an event type), equity (paper account vs S&P 500), simulation (Monte "
+                       "Carlo fan of one instrument with its open call's stop/target), portfolio_sim (fan of the paper "
+                       "account's value), scenario (what-if: driver + move, or an event type), or bar (your own "
                        "labels/values taken from tool results). You get back a one-line summary.",
         "parameters": {"type": "object", "properties": {
-            "kind": {"type": "string", "enum": ["price", "compare", "analogs", "event_study", "equity", "bar"]},
+            "kind": {"type": "string", "enum": ["price", "compare", "analogs", "event_study", "equity", "bar",
+                                                "simulation", "portfolio_sim", "scenario"]},
             "instrument": _INSTR,
             "instruments": {"type": "array", "items": {"type": "string"}, "description": "For compare: 2-6 instruments"},
             "event_type": {"type": "string", "enum": list(EVENT_TYPES)},
@@ -414,7 +482,10 @@ TOOLS: dict[str, dict] = {
             "title": {"type": "string"},
             "labels": {"type": "array", "items": {"type": "string"}, "description": "For bar"},
             "values": {"type": "array", "items": {"type": "number"}, "description": "For bar; fractions for pct"},
-            "value_format": {"type": "string", "enum": ["pct", "number", "money"]}},
+            "value_format": {"type": "string", "enum": ["pct", "number", "money"]},
+            "horizon": {"type": "integer", "minimum": 1, "maximum": 60, "description": "Sessions, for simulation/portfolio_sim/scenario"},
+            "driver": {"type": "string", "description": "For scenario: instrument (WTI, VIX…) or event type"},
+            "move": {"type": "number", "description": "For scenario with an instrument driver, e.g. 0.10"}},
             "required": ["kind"]},
     },
     "propose_recommendation": {

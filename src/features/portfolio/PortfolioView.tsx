@@ -16,6 +16,7 @@ import {
   TableWrap,
 } from "@/features/shell/ui";
 import { MarketChip } from "@/features/markets/MarketChip";
+import { PortfolioSimulationPanel, ScenarioPanel } from "@/features/sim/SimPanels";
 import { api } from "@/lib/api";
 import { ago, humanize, money, num, pct, price, shortDate, tone } from "@/lib/format";
 import { useNav } from "@/lib/nav";
@@ -108,6 +109,7 @@ export default function PortfolioView() {
           ]}
         />
       </Panel>
+      <PortfolioSimulationPanel />
       <Panel title="Positions">
         {data.positions.length === 0 ? (
           <Empty title="No positions">
@@ -182,6 +184,7 @@ export default function PortfolioView() {
           </TableWrap>
         )}
       </Panel>
+      <ScenarioPanel />
       <Panel title="Closed trades">
         {!data.trades?.length ? (
           <Empty title="No closed trades yet" />

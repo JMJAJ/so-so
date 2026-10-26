@@ -615,6 +615,139 @@ export interface ChatMessage {
   pending?: boolean;
 }
 
+export type FanRow = {
+  day: number;
+  p10: number;
+  p25: number;
+  p50: number;
+  p75: number;
+  p90: number;
+};
+
+/** How often past outcomes landed inside the simulator's bands (replayed on past dates). */
+export interface SimCheckScore {
+  n: number;
+  in80: number;
+  in50: number;
+  brier: number;
+  brier_base: number;
+  verdict: string;
+  scope?: string;
+  horizon?: number;
+}
+
+export interface AssetSimulation {
+  instrument_id: string;
+  symbol: string;
+  price: number;
+  horizon: number;
+  paths: number;
+  as_of: string;
+  fan: FanRow[];
+  p_up: number;
+  mean: number;
+  median: number;
+  var95: number;
+  cvar95: number;
+  typical_drawdown: number;
+  vol_now: number;
+  vol_long: number;
+  method: { basis: string; drift: string; history_days: number; block: number };
+  bracket?: {
+    direction: "long" | "short";
+    stop: number | null;
+    target: number | null;
+    p_target: number;
+    p_stop: number;
+    p_neither: number;
+    p_profit: number;
+    expected_return: number;
+    note: string;
+  };
+  bracket_source?: string;
+  levels?: Array<{ label: string; value: number }>;
+  check: SimCheckScore | null;
+}
+
+export interface PortfolioSimulation {
+  account: string;
+  equity: number;
+  horizon: number;
+  paths: number;
+  fan: FanRow[] | null;
+  note: string;
+  pending_skipped: number;
+  positions: Array<{
+    instrument_id?: string;
+    symbol: string;
+    side: "long" | "short";
+    skipped?: string;
+    notional?: number;
+    mean_pnl?: number;
+    p5_pnl?: number;
+    p_stop?: number;
+    p_target?: number;
+    risk_share?: number;
+  }>;
+  mean_pnl?: number;
+  median_pnl?: number;
+  p_loss?: number;
+  p_loss_5pct?: number;
+  p_loss_10pct?: number;
+  p_gain_5pct?: number;
+  var95?: number;
+  cvar95?: number;
+  check?: SimCheckScore | null;
+}
+
+export interface ScenarioPreset {
+  id: string;
+  label: string;
+  driver: string;
+  move?: number;
+  window?: number;
+}
+
+export interface ScenarioResult {
+  driver: string;
+  move: number | null;
+  window: number | null;
+  horizon: number;
+  title: string;
+  occurrences: number;
+  now: string;
+  account: string;
+  account_effect: number | null;
+  reliable_count: number;
+  note: string;
+  assets: Array<{
+    instrument_id: string;
+    symbol: string;
+    n: number;
+    mean: number;
+    median: number;
+    hit_rate: number;
+    normal: number;
+    edge: number;
+    t_stat: number;
+    q_value: number | null;
+    stable: boolean;
+    reliable: boolean;
+    position?: "long" | "short";
+    position_effect?: number;
+  }>;
+}
+
+export interface SimCheckSummary {
+  horizon: number;
+  n: number;
+  overall: SimCheckScore | null;
+  by_class: Record<string, SimCheckScore>;
+  from?: string;
+  to?: string;
+  note: string;
+}
+
 /** Charts the AI puts in chat via the show_chart tool (built server-side from stored data). */
 export type ChatChart =
   | {
@@ -630,6 +763,8 @@ export type ChatChart =
       title: string;
       horizon: number;
       fan: NonNullable<AnalogResult["fan"]>;
+      levels?: Array<{ label: string; value: number }>;
+      note?: string;
     }
   | {
       kind: "bar";

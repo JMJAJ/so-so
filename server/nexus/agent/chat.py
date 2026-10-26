@@ -32,6 +32,14 @@ SLASH = {
                "with a table of the trades (entry, stop, target, probability, key evidence) and the candidates you "
                "rejected and why. Recording zero trades is fine if nothing has real evidence.",
     "/chart": "Show {arg} with show_chart (pick the most fitting kind), then explain what it shows in 2-4 sentences.",
+    "/simulate": "Simulate {arg} with the simulate tool (use the open call's bracket if there is one), show it with "
+                 "show_chart kind=simulation, and explain the range, the stop/target odds and the honesty check in "
+                 "plain words. It is a range of outcomes, not a prediction.",
+    "/whatif": "Run the scenario tool for: {arg}. Pick the driver (instrument or event type), move and window from my "
+               "words, show it with show_chart kind=scenario, and tell me which effects are reliable, what it would "
+               "mean for my open positions, and which rows are just noise.",
+    "/risk": "Simulate my paper account with simulate_portfolio{arg}, show it with show_chart kind=portfolio_sim, and "
+             "explain the range of outcomes, the chance of losing more than 5%, and which position carries the most risk.",
     "/bypass": "Place this paper trade exactly as I say, without deciding whether it's a good idea: {arg}. Work out "
                "the instrument, direction, stop, target and horizon from my words. Where I left one out, call "
                "asset_snapshot and use a stop 2x the daily ATR (vol_20d x price / sqrt(252)) from the price, a target "
@@ -64,6 +72,11 @@ def expand(text: str) -> str:
         return template.format(arg=f" (focus: {arg})" if arg else "", max_recs=config.get_int("analyst_max_recs"))
     if command.lower() == "/bypass":
         return template.format(arg=arg) if arg else BYPASS_EMPTY
+    if command.lower() == "/risk":
+        return template.format(arg=f" over {arg}" if arg else "")
+    if command.lower() in ("/simulate", "/whatif") and not arg:
+        return template.format(arg="the open AI call (or SPY if there is none)" if command.lower() == "/simulate"
+                               else "oil +10% within a week")
     if command.lower() == "/chart":
         return template.format(arg=arg or "my paper equity vs the S&P 500")
     return template.format(arg=arg or "the strongest current candidate")
