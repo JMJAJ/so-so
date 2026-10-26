@@ -14,26 +14,50 @@ _cache: dict = {"at": 0.0, "rows": []}
 
 
 def forecasts(*, refresh: bool = False, progress=None) -> list[dict]:
-    with _lock:
-        if not refresh and _cache["rows"] and time.time() - _cache["at"] < TTL:
-            return _cache["rows"]
-        enabled = [c.strip() for c in config.get("enabled_classes").split(",") if c.strip()]
-        from .. import universe
-
-        ids = [item.id for item in universe.tradable(enabled)]
-        rows = signals.predict(ids, progress=progress)
-        recent = event_study.recent_events(days=7)
-        for row in rows:
-            row["recent_events"] = [
-                event["type"] for event in recent
-                if event["instrument_id"] in (None, row["instrument_id"])
-            ][:6]
-            news = nlp.recent(row["instrument_id"], days=3, limit=10, min_magnitude=2)
-            row["news_flow"] = sum((n.get("direction") or 0) * (n.get("magnitude") or 0) for n in news)
-            row["news_count"] = len(news)
-        _cache.update(at=time.time(), rows=rows)
-        db.log("info", "scan", f"Scanned {len(rows)} instruments")
+    """Forecast rows for the tradable universe. Readers never wait on a recompute: they get the
+    last finished rows at once (a stale cache refreshes in the background). Only a caller that
+    asks for `refresh` (jobs, the analyst), or the very first call, waits for a computation."""
+    rows = _cache["rows"]
+    if rows and not refresh:
+        if time.time() - _cache["at"] >= TTL and not _lock.locked():
+            threading.Thread(target=_recompute, daemon=True, name="forecasts").start()
         return rows
+    with _lock:
+        # Someone else may have finished a computation while this call waited for the lock.
+        if not refresh and _cache["rows"]:
+            return _cache["rows"]
+        return _compute(progress)
+
+
+def _recompute() -> None:
+    if not _lock.acquire(blocking=False):
+        return
+    try:
+        _compute(None)
+    except Exception as exc:  # a failed background refresh keeps serving the old rows
+        db.log("warn", "scan", f"background refresh failed: {exc}")
+    finally:
+        _lock.release()
+
+
+def _compute(progress) -> list[dict]:
+    enabled = [c.strip() for c in config.get("enabled_classes").split(",") if c.strip()]
+    from .. import universe
+
+    ids = [item.id for item in universe.tradable(enabled)]
+    rows = signals.predict(ids, progress=progress)
+    recent = event_study.recent_events(days=7)
+    for row in rows:
+        row["recent_events"] = [
+            event["type"] for event in recent
+            if event["instrument_id"] in (None, row["instrument_id"])
+        ][:6]
+        news = nlp.recent(row["instrument_id"], days=3, limit=10, min_magnitude=2)
+        row["news_flow"] = sum((n.get("direction") or 0) * (n.get("magnitude") or 0) for n in news)
+        row["news_count"] = len(news)
+    _cache.update(at=time.time(), rows=rows)
+    db.log("info", "scan", f"Scanned {len(rows)} instruments")
+    return rows
 
 
 def ranked(asset_class: str | None = None, direction: str = "both", limit: int = 15) -> list[dict]:

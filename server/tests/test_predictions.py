@@ -181,3 +181,16 @@ def test_best_bracket_respects_the_gate(synthetic):
         assert best["stop"] < price < best["target"]
         assert best["target_pct"] >= 1.5 * best["stop_pct"] - 1e-9
     assert probability.best_bracket("etf:gld", "long", price, 0.99) is None
+
+
+def test_forecast_readers_never_wait_for_a_refresh(nexus_db):
+    import time as _time
+
+    from nexus.research import scan
+
+    scan._cache.update(at=_time.time() - 10 * scan.TTL, rows=[{"instrument_id": "etf:spy"}])
+    with scan._lock:  # a refresh is running
+        started = _time.perf_counter()
+        rows = scan.forecasts()
+        assert _time.perf_counter() - started < 0.1
+    assert rows == [{"instrument_id": "etf:spy"}]

@@ -31,6 +31,7 @@ interface ChatControl {
 }
 
 const ChatContext = createContext<ChatControl | null>(null);
+const TEXT_FLUSH_MS = 80;
 
 // The current conversation and whether the drawer is open survive a page refresh.
 const STORAGE_KEY = "nexus.chat";
@@ -109,14 +110,31 @@ export function ChatProvider({ children }: { children: ReactNode }) {
       abort.current = controller;
       const update = (fn: (last: ChatMessage) => ChatMessage) =>
         setMessages((current) => [...current.slice(0, -1), fn(current[current.length - 1])]);
+      // Tokens arrive dozens of times a second; render them in batches (one React update per
+      // TEXT_FLUSH_MS) so a long answer can't saturate the main thread.
+      let pendingText = "";
+      let flushTimer: number | undefined;
+      const flushText = () => {
+        if (flushTimer !== undefined) window.clearTimeout(flushTimer);
+        flushTimer = undefined;
+        if (!pendingText) return;
+        const chunk = pendingText;
+        pendingText = "";
+        update((last) => ({ ...last, text: last.text + chunk }));
+      };
       try {
         await streamChat(
           message,
           conversationRef.current,
           (event) => {
+            if (event.type === "text") {
+              pendingText += event.text;
+              if (flushTimer === undefined)
+                flushTimer = window.setTimeout(flushText, TEXT_FLUSH_MS);
+              return;
+            }
+            flushText(); // keep text and tool events in order
             if (event.type === "conversation") setConversationId(event.id);
-            else if (event.type === "text")
-              update((last) => ({ ...last, text: last.text + event.text }));
             else if (event.type === "tool_call")
               update((last) => ({
                 ...last,
@@ -143,6 +161,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
           controller.signal,
         );
       } catch (error) {
+        flushText();
         if (!(error instanceof DOMException && error.name === "AbortError")) {
           update((last) => ({
             ...last,
@@ -150,12 +169,22 @@ export function ChatProvider({ children }: { children: ReactNode }) {
           }));
         }
       } finally {
+        flushText();
         update((last) => ({ ...last, pending: false }));
         busyRef.current = false;
         setBusy(false);
         abort.current = null;
-        // A chat turn can create recommendations and open paper positions.
-        void client.invalidateQueries();
+        // A chat turn can create recommendations and open paper positions. Refresh only what
+        // that touches (the live stream covers the rest), not every cached query at once.
+        for (const key of [
+          "portfolio",
+          "dashboard",
+          "track-record",
+          "briefs",
+          "accounts",
+          "conversations",
+        ])
+          void client.invalidateQueries({ queryKey: [key] });
       }
     },
     [client],

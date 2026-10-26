@@ -1,5 +1,5 @@
 import { ChevronRight, Loader2, Send, Square, Wrench } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { memo, useEffect, useRef, useState } from "react";
 
 import { Markdown } from "@/features/shell/Markdown";
 import { humanize } from "@/lib/format";
@@ -22,43 +22,61 @@ export const COMMANDS: Array<[string, string]> = [
   ["/portfolio", "review open positions"],
 ];
 
+/** One message. Memoized: while an answer streams, only the last message gets a new object,
+ * so earlier messages (their markdown, charts and tool traces) don't re-render. */
+const MessageItem = memo(function MessageItem({ message }: { message: ChatMessage }) {
+  if (message.role === "user") {
+    return (
+      <div className="ml-8 rounded-xl border border-border bg-raised px-3 py-2 text-xs">
+        {message.text}
+      </div>
+    );
+  }
+  return (
+    <div className="space-y-2">
+      {(message.tools ?? []).length > 0 && <ToolTrace tools={message.tools ?? []} />}
+      {(message.charts ?? []).map((chart, i) => (
+        <ChatChart key={i} chart={chart} />
+      ))}
+      {message.text ? <Markdown text={message.text} /> : null}
+      {message.pending && (
+        <div className="flex items-center gap-2 text-xs text-muted-foreground">
+          <Loader2 className="h-3 w-3 animate-spin text-bull" /> researching
+        </div>
+      )}
+    </div>
+  );
+});
+
 /** Messages + composer, shared by the drawer and the full Chat page. */
 export function ChatPanel({ wide = false }: { wide?: boolean }) {
   const { messages, busy, input, setInput, send, stop } = useChat();
   const scroller = useRef<HTMLDivElement>(null);
+  // Follow new output only while the reader is at the bottom; scrolling up to read stops it.
+  const following = useRef(true);
 
   useEffect(() => {
-    scroller.current?.scrollTo({ top: scroller.current.scrollHeight });
+    const el = scroller.current;
+    if (!el || !following.current) return;
+    const frame = window.requestAnimationFrame(() => el.scrollTo({ top: el.scrollHeight }));
+    return () => window.cancelAnimationFrame(frame);
   }, [messages]);
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      <div ref={scroller} className="min-h-0 flex-1 overflow-y-auto px-3 py-4">
+      <div
+        ref={scroller}
+        className="min-h-0 flex-1 overflow-y-auto px-3 py-4"
+        onScroll={(event) => {
+          const el = event.currentTarget;
+          following.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
+        }}
+      >
         <div className={cn("space-y-4", wide && "mx-auto max-w-3xl")}>
           {messages.length === 0 && <Welcome wide={wide} onPick={(command) => setInput(command)} />}
-          {messages.map((message, index) =>
-            message.role === "user" ? (
-              <div
-                key={index}
-                className="ml-8 border rounded-xl border-border bg-raised px-3 py-2 text-xs"
-              >
-                {message.text}
-              </div>
-            ) : (
-              <div key={index} className="space-y-2">
-                {(message.tools ?? []).length > 0 && <ToolTrace tools={message.tools ?? []} />}
-                {(message.charts ?? []).map((chart, i) => (
-                  <ChatChart key={i} chart={chart} />
-                ))}
-                {message.text ? <Markdown text={message.text} /> : null}
-                {message.pending && (
-                  <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                    <Loader2 className="h-3 w-3 animate-spin text-bull" /> researching
-                  </div>
-                )}
-              </div>
-            ),
-          )}
+          {messages.map((message, index) => (
+            <MessageItem key={index} message={message} />
+          ))}
         </div>
       </div>
 

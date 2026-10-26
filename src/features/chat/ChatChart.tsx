@@ -1,3 +1,5 @@
+import { memo } from "react";
+
 import { BarChart, FanChart, LineChart, chartColors } from "@/features/charts/svg";
 import { money, num, pct, price } from "@/lib/format";
 import type { ChatChart as ChatChartData } from "@/lib/types";
@@ -12,7 +14,7 @@ const SERIES_COLORS = [
 ];
 const LEVEL_COLORS = { amber: chartColors.AMBER, bull: chartColors.BULL, bear: chartColors.BEAR };
 
-export function ChatChart({ chart }: { chart: ChatChartData }) {
+export const ChatChart = memo(function ChatChart({ chart }: { chart: ChatChartData }) {
   return (
     <figure className="rounded-lg border border-border bg-background/60 p-3">
       <figcaption className="mb-2 text-xs font-bold text-foreground">{chart.title}</figcaption>
@@ -48,4 +50,4 @@ export function ChatChart({ chart }: { chart: ChatChartData }) {
       )}
     </figure>
   );
-}
+});

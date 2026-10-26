@@ -1,8 +1,9 @@
-import { Fragment, type ReactNode } from "react";
+import { Fragment, memo, type ReactNode } from "react";
 
 /** Minimal markdown for AI output: headings, lists, tables, code, bold/italic.
  * Renders React nodes only (no innerHTML), so model output can't inject markup. */
-export function Markdown({ text }: { text: string }) {
+/** Memoized on `text`: re-parsed only when the text itself changes. */
+export const Markdown = memo(function Markdown({ text }: { text: string }) {
   const lines = text.replace(/\r/g, "").split("\n");
   const blocks: ReactNode[] = [];
   let i = 0;
@@ -114,7 +115,7 @@ export function Markdown({ text }: { text: string }) {
     blocks.push(<p key={blocks.length}>{inline(para.join(" "))}</p>);
   }
   return <div className="space-y-2 text-xs leading-relaxed">{blocks}</div>;
-}
+});
 
 function inline(text: string): ReactNode {
   const parts = text.split(/(`[^`]+`|\*\*[^*]+\*\*|\*[^*]+\*)/g);
