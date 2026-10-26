@@ -205,12 +205,26 @@ CREATE TABLE IF NOT EXISTS trades (
 CREATE INDEX IF NOT EXISTS idx_trades_closed ON trades(closed_at DESC);
 
 CREATE TABLE IF NOT EXISTS equity_snapshots (
-    date TEXT PRIMARY KEY,
+    account_id TEXT NOT NULL DEFAULT 'main',
+    date TEXT NOT NULL,
     equity REAL NOT NULL,
     cash REAL NOT NULL,
     exposure REAL NOT NULL,
-    spy_close REAL
+    spy_close REAL,
+    PRIMARY KEY (account_id, date)
 ) WITHOUT ROWID;
+
+-- Paper trading accounts. AI recommendations are shared research; positions, trades and
+-- equity history belong to one account.
+CREATE TABLE IF NOT EXISTS accounts (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    starting_equity REAL NOT NULL,
+    started_at TEXT NOT NULL DEFAULT '',
+    gate TEXT NOT NULL DEFAULT 'strict',
+    autopilot INTEGER NOT NULL DEFAULT 1,
+    created_at TEXT NOT NULL
+);
 
 CREATE TABLE IF NOT EXISTS settings (
     key TEXT PRIMARY KEY,
@@ -352,6 +366,9 @@ COLUMN_MIGRATIONS = [
     ("recommendations", "hold_return REAL"),
     # Post-mortem lesson written after the call closed.
     ("recommendations", "lesson TEXT"),
+    # Paper accounts (existing rows belong to the default account).
+    ("positions", "account_id TEXT NOT NULL DEFAULT 'main'"),
+    ("trades", "account_id TEXT NOT NULL DEFAULT 'main'"),
 ]
 
 
@@ -360,6 +377,21 @@ def _migrate(conn: sqlite3.Connection) -> None:
         columns = {row["name"] for row in conn.execute(f"PRAGMA table_info({table})")}
         if definition.split()[0] not in columns:
             conn.execute(f"ALTER TABLE {table} ADD COLUMN {definition}")
+    # equity_snapshots was keyed by date alone; rebuild it keyed by (account, date).
+    columns = {row["name"] for row in conn.execute("PRAGMA table_info(equity_snapshots)")}
+    if "account_id" not in columns:
+        conn.executescript("""
+            ALTER TABLE equity_snapshots RENAME TO equity_snapshots_old;
+            CREATE TABLE equity_snapshots (
+                account_id TEXT NOT NULL DEFAULT 'main', date TEXT NOT NULL, equity REAL NOT NULL,
+                cash REAL NOT NULL, exposure REAL NOT NULL, spy_close REAL, PRIMARY KEY (account_id, date)
+            ) WITHOUT ROWID;
+            INSERT INTO equity_snapshots(account_id,date,equity,cash,exposure,spy_close)
+                SELECT 'main', date, equity, cash, exposure, spy_close FROM equity_snapshots_old;
+            DROP TABLE equity_snapshots_old;
+        """)
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_positions_account ON positions(account_id)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_trades_account ON trades(account_id, closed_at)")
 
 
 def init_db() -> None:

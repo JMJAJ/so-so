@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextvars
 import json
 import queue
 import threading
@@ -16,7 +17,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel
 
-from . import auth, config, data, db, jobs, keepalive, live, llm, markets, nlp, paper, recommendations, snapshot, universe
+from . import accounts, auth, config, data, db, jobs, keepalive, live, llm, markets, nlp, paper, recommendations, snapshot, universe
 from .agent import analyst, chat, tools
 from .ingest import prices
 from .research import analogs, backtest, correlation, event_study, probability, replay, scan
@@ -32,6 +33,7 @@ async def lifespan(_app: FastAPI):
         except Exception as exc:  # noqa: BLE001 — start fresh rather than not at all
             print(f"[snapshot] restore failed, starting with an empty database: {exc}")
     db.init_db()
+    accounts.ensure_default()
     snapshot.start()
     keepalive.start()
     jobs.start_scheduler()
@@ -64,7 +66,13 @@ app.add_middleware(
 async def _require_login(request: Request, call_next):
     if not auth.allowed(request.url.path, request.cookies.get(auth.COOKIE)):
         return JSONResponse(status_code=401, content={"detail": "Login required"})
-    return await call_next(request)
+    # The paper account this request acts on (chosen in the UI; the default otherwise).
+    requested = request.headers.get("x-nexus-account") or request.query_params.get("account")
+    token = accounts.set_current(accounts.resolve(requested) if requested else accounts.DEFAULT_ID)
+    try:
+        return await call_next(request)
+    finally:
+        accounts._current.reset(token)
 
 
 @app.exception_handler(KeyError)
@@ -138,7 +146,8 @@ def status():
         "analyst_running": analyst.running(),
         "jobs": [{k: j.get(k) for k in ("name", "running", "progress", "last_status", "last_finished", "next_run")}
                  for j in jobs.status()],
-        "autopilot": config.get_bool("autopilot"),
+        "autopilot": accounts.get()["autopilot"],
+        "account": {k: accounts.get()[k] for k in ("id", "name", "gate")},
     })
 
 
@@ -393,9 +402,55 @@ class ResetIn(BaseModel):
 
 @app.post("/api/paper/reset")
 def paper_reset(body: ResetIn):
-    if body.starting_equity is not None and not 100 <= body.starting_equity <= 1_000_000_000:
-        raise ValueError("Starting money must be between $100 and $1,000,000,000")
+    """Reset the account in use (X-Nexus-Account)."""
     return clean(paper.reset_account(body.starting_equity))
+
+
+class AccountIn(BaseModel):
+    name: str | None = None
+    starting_equity: float | str | None = None
+    gate: str | None = None
+    autopilot: bool | None = None
+
+
+@app.get("/api/accounts")
+def list_accounts():
+    rows = []
+    for account in accounts.all_accounts():
+        state = paper.portfolio(mark=False, account_id=account["id"])
+        rows.append({**account, "equity": state["equity"], "return_pct": state["return_pct"],
+                     "positions": state["open_count"] + state["pending_count"], "trade_count": state["trade_count"]})
+    return clean({"current": accounts.current(), "accounts": rows})
+
+
+@app.post("/api/accounts")
+def create_account(body: AccountIn):
+    account = accounts.create(body.name or "", body.starting_equity if body.starting_equity is not None else 1000,
+                              body.gate or "strict", bool(body.autopilot))
+    paper.snapshot_equity(account["id"])
+    live.publish("portfolio")
+    return clean(account)
+
+
+@app.patch("/api/accounts/{account_id}")
+def update_account(account_id: str, body: AccountIn):
+    account = accounts.update(account_id, name=body.name, starting_equity=body.starting_equity, gate=body.gate,
+                              autopilot=body.autopilot)
+    live.publish("portfolio")
+    return clean(account)
+
+
+@app.post("/api/accounts/{account_id}/reset")
+def reset_account(account_id: str, body: ResetIn):
+    accounts.get(account_id)
+    return clean(paper.reset_account(body.starting_equity, account_id=account_id))
+
+
+@app.delete("/api/accounts/{account_id}")
+def delete_account(account_id: str):
+    accounts.delete(account_id)
+    live.publish("portfolio")
+    return {"deleted": account_id}
 
 
 @app.post("/api/recommendations/{rec_id}/trade")
@@ -415,8 +470,8 @@ def portfolio():
         "equity_curve": paper.equity_curve(),
         "trades": [
             {**row, "symbol": (universe.get(row["instrument_id"]) or universe.require("etf:spy")).symbol}
-            for row in db.rows("SELECT * FROM trades WHERE closed_at > ? ORDER BY closed_at DESC LIMIT 200",
-                               (config.get("account_started_at"),))
+            for row in db.rows("SELECT * FROM trades WHERE account_id=? AND closed_at > ? ORDER BY closed_at DESC "
+                               "LIMIT 200", (accounts.current(), accounts.get()["started_at"]))
         ],
     })
 
@@ -550,7 +605,10 @@ def chat_send(body: ChatIn):
         finally:
             events.put(None)
 
-    threading.Thread(target=worker, daemon=True, name="chat").start()
+    # A plain thread doesn't inherit context variables; run the worker in a copy of this request's
+    # context so its trades go to the account the user is looking at.
+    context = contextvars.copy_context()
+    threading.Thread(target=context.run, args=(worker,), daemon=True, name="chat").start()
 
     def stream():
         yield f"data: {json.dumps({'type': 'conversation', 'id': conv_id})}\n\n"
@@ -621,6 +679,7 @@ def get_settings():
 def put_settings(body: SettingsIn):
     body.values.pop("account_started_at", None)  # only a reset sets it; a stale form must not undo one
     if "starting_equity" in body.values:
+        accounts.update(accounts.current(), starting_equity=body.values["starting_equity"])
         try:
             amount = float(str(body.values["starting_equity"]).replace(",", "").replace("$", ""))
         except ValueError:

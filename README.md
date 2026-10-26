@@ -51,6 +51,9 @@ pairs and commodity futures.
   open positions, news triage and post-mortems, plus an event playbook rebuilt from the reliable
   event studies. Every call records which skills were loaded; the Track Record shows results by
   skill, and AI early closes are compared with what holding would have returned.
+- **Several paper accounts.** Each has its own starting money, positions and history, plus a trade
+  gate: *strict* only takes positive-expected-value trades, *any* takes whatever you ask for (and
+  still shows the honest odds). Switch accounts from the top bar; manage them in Settings.
 - **Portfolio risk.** A new position whose returns move with existing ones (60-day correlation,
   adjusted for long/short) counts as the same bet. It's refused above two risk budgets per bet.
 - **Verification.** Recommendations are scored on their own path (stop, target or horizon) against

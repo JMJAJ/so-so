@@ -11,7 +11,7 @@ import math
 import uuid
 from datetime import datetime, timezone
 
-from . import config, db, live, paper, universe
+from . import accounts, config, db, live, paper, universe
 from .ingest import prices
 
 CONFIDENCE = ("low", "medium", "high")
@@ -59,8 +59,16 @@ def create(payload: dict, *, source: str, run_id: str | None = None, signal_snap
     existing = db.one("SELECT * FROM recommendations WHERE instrument_id=? AND status='open'", (item.id,))
     if existing:
         if traded(existing):
-            raise ValueError(f"There is already an open recommendation on {item.symbol} with a paper position")
-        # A call that never got a paper position (or whose position is gone) is replaced.
+            raise ValueError(f"Already holding {item.symbol} in this account (call {existing['id']})")
+        if _positions_of(existing["id"]):
+            # Another account holds this call: trade the same call here instead of replacing it.
+            rec = get(existing["id"])
+            try:
+                return trade(existing["id"])
+            except (ValueError, KeyError) as exc:
+                rec["trade_note"] = str(exc)
+                return rec
+        # A call that no account traded is replaced.
         _close(_public(existing), quote_price(item.id) or existing["entry_price"], "superseded")
     quote = prices.quote(item.id)
     if not quote or quote["price"] is None:
@@ -81,16 +89,26 @@ def create(payload: dict, *, source: str, run_id: str | None = None, signal_snap
     )
     if skills:
         db.execute("UPDATE recommendations SET skills=? WHERE id=?", (db.dumps(skills), rec_id))
-    should_trade = config.get_bool("autopilot") if auto_trade is None else auto_trade
-    trade_note = None
-    if should_trade:
+    # The analyst trades its calls in every account with autopilot on; chat and manual calls go
+    # to the account in use. `auto_trade` overrides the account setting (tests, API callers).
+    if source == "analyst" and auto_trade is None:
+        targets = [a for a in accounts.all_accounts() if a["autopilot"]]
+    else:
+        account = accounts.get()
+        should_trade = account["autopilot"] if auto_trade is None else auto_trade
+        targets = [account] if should_trade else []
+    notes = []
+    for account in targets:
         try:
             position = paper.open_position(item.id, clean["direction"], stop=clean["stop"], target=clean["target"],
-                                           expires_at=expires_at, recommendation_id=rec_id, source=source)
-            db.execute("UPDATE recommendations SET position_id=? WHERE id=?", (position["id"], rec_id))
+                                           expires_at=expires_at, recommendation_id=rec_id, source=source,
+                                           account_id=account["id"])
+            db.execute("UPDATE recommendations SET position_id=COALESCE(position_id, ?) WHERE id=?",
+                       (position["id"], rec_id))
         except (ValueError, KeyError) as exc:
-            trade_note = str(exc)
-            db.log("warn", "autopilot", f"{item.symbol}: recommendation saved but not traded ({exc})")
+            notes.append(f"{account['name']}: {exc}" if len(targets) > 1 else str(exc))
+            db.log("warn", "autopilot", f"{item.symbol}: not traded in {account['name']} ({exc})")
+    trade_note = "; ".join(notes) or None
     db.log("info", "recommend", f"{clean['direction'].upper()} {item.symbol} {clean['horizon_days']}d "
            f"p={clean['probability']:.2f} ({source})")
     rec = get(rec_id)
@@ -100,9 +118,19 @@ def create(payload: dict, *, source: str, run_id: str | None = None, signal_snap
     return rec
 
 
-def traded(rec: dict) -> bool:
-    """Whether the call has a live paper position (pending or open)."""
-    return bool(rec.get("position_id")) and bool(db.one("SELECT 1 FROM positions WHERE id=?", (rec["position_id"],)))
+def _positions_of(rec_id: str, account_id: str | None = None) -> list[dict]:
+    """Live paper positions trading this call (in one account, or all of them)."""
+    sql = "SELECT * FROM positions WHERE recommendation_id=?"
+    params: list = [rec_id]
+    if account_id:
+        sql += " AND account_id=?"
+        params.append(account_id)
+    return db.rows(sql, params)
+
+
+def traded(rec: dict, account_id: str | None = None) -> bool:
+    """Whether the call has a live paper position (pending or open) in the account in use."""
+    return bool(_positions_of(rec["id"], account_id or accounts.current()))
 
 
 def quote_price(instrument_id: str) -> float | None:
@@ -124,10 +152,10 @@ def trade(rec_id: str) -> dict:
     if rec["status"] != "open":
         raise ValueError(f"{rec['symbol']} call is {rec['status']}")
     if traded(rec):
-        raise ValueError(f"{rec['symbol']} already has a paper position")
+        raise ValueError(f"{rec['symbol']} already has a paper position in this account")
     position = paper.open_position(rec["instrument_id"], rec["direction"], stop=rec["stop"], target=rec["target"],
                                    expires_at=rec["expires_at"], recommendation_id=rec_id, source="manual")
-    db.execute("UPDATE recommendations SET position_id=? WHERE id=?", (position["id"], rec_id))
+    db.execute("UPDATE recommendations SET position_id=COALESCE(position_id, ?) WHERE id=?", (position["id"], rec_id))
     live.publish("recommendations")
     return get(rec_id)
 
@@ -177,8 +205,8 @@ def cancel(rec_id: str, reason: str = "cancelled by user") -> dict:
     rec = get(rec_id)
     if rec["status"] != "open":
         raise ValueError("Only open recommendations can be cancelled")
-    if rec.get("position_id") and db.one("SELECT 1 FROM positions WHERE id=?", (rec["position_id"],)):
-        paper.close_position(rec["position_id"], reason="cancelled")
+    for position in _positions_of(rec_id):
+        paper.close_position(position["id"], reason="cancelled")
     _close(rec, rec.get("mark_price") or rec["entry_price"], "cancelled")
     db.execute("UPDATE recommendations SET status='cancelled', exit_reason=? WHERE id=?", (reason, rec_id))
     live.publish("recommendations")
@@ -196,8 +224,8 @@ def close_early(rec_id: str, reason: str, *, skills: list[str] | None = None) ->
     quote = prices.quote(rec["instrument_id"])
     if not quote or quote["price"] is None:
         raise ValueError(f"No price for {rec['symbol']}")
-    if rec.get("position_id") and db.one("SELECT 1 FROM positions WHERE id=?", (rec["position_id"],)):
-        paper.close_position(rec["position_id"], reason="ai_review")
+    for position in _positions_of(rec_id):
+        paper.close_position(position["id"], reason="ai_review")
     _close(rec, quote["price"], "ai_review")
     db.execute("UPDATE recommendations SET close_skills=?, invalidation=COALESCE(invalidation,'') || ? WHERE id=?",
                (db.dumps(skills or []), f"\n[closed early] {reason.strip()[:400]}", rec_id))

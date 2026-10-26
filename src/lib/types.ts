@@ -109,6 +109,21 @@ export interface Recommendation {
   lesson?: string | null;
 }
 
+export interface PaperAccount {
+  id: string;
+  name: string;
+  starting_equity: number;
+  started_at: string;
+  /** strict: only positive-EV trades; any: whatever the user asks for. */
+  gate: "strict" | "any";
+  autopilot: boolean;
+  created_at: string;
+  equity: number;
+  return_pct: number;
+  positions: number;
+  trade_count: number;
+}
+
 export interface SkillInfo {
   name: string;
   description: string;

@@ -36,7 +36,8 @@ The frontend is TanStack Start (React 19). The backend is a Python FastAPI packa
 | `server/nexus/agent/factcheck.py` | Checks t/n/% numbers in AI answers against that turn's tool results |
 | `server/nexus/agent/charts.py` | `show_chart` payloads built from stored data; the loop sends them to the UI and only a summary to the model |
 | `server/nexus/snapshot.py`, `server/nexus/auth.py` | Deploy: SQLite snapshots to Supabase Storage; `NEXUS_PASSWORD` login (see DEPLOY.md) |
-| `server/nexus/paper.py` | Paper broker: sizing, fills, stops/targets/expiry, correlated-risk limit, portfolio |
+| `server/nexus/paper.py` | Paper broker: sizing, fills, stops/targets/expiry, correlated-risk limit, portfolio (per account) |
+| `server/nexus/accounts.py` | Paper accounts (own money, positions, trades, history, gate `strict`/`any`); the account in use comes from the `X-Nexus-Account` header via a context variable |
 | `server/nexus/recommendations.py` | Recommendation lifecycle, scoring, track record, lessons |
 | `server/nexus/api.py` | All HTTP routes (chat is SSE) |
 | `server/nexus/cli.py` | `python -m nexus …` |
@@ -60,7 +61,10 @@ npm run typecheck && npm run lint                # frontend checks
   badges. Don't present a signal as an edge unless walk-forward says so. An event effect is
   evidence only when `reliable` (q ≤ 0.10 after Benjamini–Hochberg, stable across halves, n ≥ 8).
 - **The server owns probabilities.** `propose_recommendation` computes them in
-  `research/probability.py` and rejects calls with EV ≤ 0. Never reintroduce LLM-stated probabilities.
+  `research/probability.py` and rejects calls with EV ≤ 0, unless the account in use has gate `any`
+  (then it records them, tagged `gate_override`). Never reintroduce LLM-stated probabilities.
+- **Accounts.** AI recommendations are shared; positions, trades and equity snapshots carry
+  `account_id`. Code that reads them must filter by `accounts.current()` (or an explicit account).
 - **Skills are process, not beliefs.** A skill says how to check something with the tools, never
   "X tends to go up after Y" unless it is generated from reliable event studies. Bump `version` when
   a skill's meaning changes so the track record compares versions separately.

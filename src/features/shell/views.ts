@@ -99,6 +99,7 @@ const DEFS: Record<View, ViewDef> = {
     data: [
       [["settings"], api.settings],
       [["jobs"], api.jobs],
+      [["accounts"], api.accounts],
     ],
   },
 };

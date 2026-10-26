@@ -12,6 +12,7 @@ import { useNav, type View } from "@/lib/nav";
 import type { SystemStatus } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
+import { AccountSwitcher } from "./AccountSwitcher";
 import { Loading } from "./ui";
 import { VIEWS, warmAll, warmView } from "./views";
 
@@ -95,6 +96,7 @@ export default function AppShell() {
           <div className="hidden flex-1 lg:block">
             <BootstrapBanner status={status.data} />
           </div>
+          <AccountSwitcher />
           <LiveDot live={live} />
           {!status.error && (
             <MarketChip marketId="nyse" className="hidden shrink-0 md:inline-flex" />

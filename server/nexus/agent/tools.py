@@ -10,7 +10,7 @@ from typing import Callable
 import numpy as np
 import pandas as pd
 
-from .. import config, data, db, nlp, paper, recommendations, universe
+from .. import accounts, config, data, db, nlp, paper, recommendations, universe
 from ..ingest import events, prices
 from ..research import analogs, backtest, correlation, event_study, probability, replay, scan
 from ..research.features import asset_features, regime_frame, regime_label
@@ -192,13 +192,14 @@ def list_recommendations(status: str = "open") -> dict:
 
 
 def _position_status(rec: dict) -> str:
-    if not rec.get("position_id"):
-        if rec.get("trade_note"):
-            return (f"NOT OPENED: no paper position was opened ({rec['trade_note']}). The recommendation is "
-                    "still recorded and will be scored on its own.")
-        return "NOT OPENED: autopilot is off, so this is tracked as a call only."
-    position = db.one("SELECT * FROM positions WHERE id=?", (rec["position_id"],))
+    account = accounts.get()
+    position = db.one("SELECT * FROM positions WHERE recommendation_id=? AND account_id=?", (rec["id"], account["id"]))
     if not position:
+        if rec.get("trade_note"):
+            return (f"NOT OPENED: no paper position in {account['name']} ({rec['trade_note']}). The recommendation "
+                    "is still recorded and will be scored on its own.")
+        if not account["autopilot"]:
+            return f"NOT OPENED: autopilot is off for {account['name']}, so this is tracked as a call only."
         return "NOT OPENED: the order was cancelled at fill time (price already through the stop)."
     if position["status"] == "pending":
         return (f"PENDING: {position['side']} {position['quantity']:g} {rec['symbol']} will fill at the next "
@@ -245,7 +246,11 @@ def propose_recommendation(**payload) -> dict:
     # The probability and expected value come from the data; the model's number is kept for comparison.
     prob = probability.evidence_probability(item.id, direction, horizon, stop_pct, target_pct, snapshot)
     minimum = config.get_float("min_probability")
-    if prob["expected_return"] <= 0 or prob["probability"] < minimum:
+    account = accounts.get()
+    failed_gate = prob["expected_return"] <= 0 or prob["probability"] < minimum
+    # Accounts with gate "any" take what the user asks for (never the unattended analyst's calls).
+    override = failed_gate and account["gate"] == "any" and source != "analyst"
+    if failed_gate and not override:
         reason = "negative expected value" if prob["expected_return"] <= 0 else f"below the {minimum:.0%} minimum"
         better = probability.best_bracket(item.id, direction, price, minimum, snapshot)
         hint = (f" A bracket that would pass on {item.symbol}: stop {better['stop']:.4g} ({better['stop_pct']:.1%}), "
@@ -264,6 +269,13 @@ def propose_recommendation(**payload) -> dict:
     payload["confidence"] = _confidence(prob)
     payload["evidence"] = [*(payload.get("evidence") or []),
                            {"type": "calibration", "summary": prob["explanation"]}]
+    if override:
+        payload["confidence"] = "low"
+        payload["evidence"].append({
+            "type": "gate_override",
+            "summary": f"Below the evidence gate (expected value {prob['expected_return']:+.2%}, probability "
+                       f"{prob['probability']:.0%}); recorded because {account['name']} accepts any trade.",
+        })
     rec = recommendations.create({**payload, "instrument_id": item.id}, source=source, run_id=run_id,
                                  signal_snapshot=snapshot, skills=loaded)
     result = {
@@ -273,6 +285,10 @@ def propose_recommendation(**payload) -> dict:
         "probability": {"computed": prob["probability"], "you_stated": stated, "how": prob["explanation"],
                         "components": prob["components"]},
         "skills_recorded": loaded or "none (load pre-trade-checklist before proposing)",
+        "account": account["name"],
+        "gate": (f"OVERRIDDEN: this trade fails the evidence gate (expected value {prob['expected_return']:+.2%}). "
+                 f"{account['name']} accepts any trade, so it was recorded; say so plainly."
+                 if override else "passed"),
         "instruction": "Report the paper_position line exactly as stated, and quote the computed probability, "
                        "not your own.",
     }

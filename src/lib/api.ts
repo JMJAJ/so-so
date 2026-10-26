@@ -13,6 +13,7 @@ import type {
   MarketEvent,
   MarketsOverview,
   ModelSummary,
+  PaperAccount,
   NewsItem,
   Portfolio,
   Recommendation,
@@ -22,6 +23,7 @@ import type {
   SystemStatus,
   TrackRecord,
 } from "./types";
+import { accountHeaders } from "./account";
 
 export class ApiError extends Error {
   status: number;
@@ -33,7 +35,7 @@ export class ApiError extends Error {
 }
 
 export async function fetchJson<T>(path: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(`/api${path}`, init);
+  const response = await fetch(`/api${path}`, accountHeaders(init));
   if (!response.ok) {
     let message = response.statusText;
     try {
@@ -108,6 +110,18 @@ export const api = {
   recommendation: (id: string) => fetchJson<Recommendation>(`/recommendations/${id}`),
   tradeRecommendation: (id: string) =>
     fetchJson<Recommendation>(`/recommendations/${id}/trade`, send("POST")),
+  accounts: () => fetchJson<{ current: string; accounts: PaperAccount[] }>("/accounts"),
+  createAccount: (body: { name: string; starting_equity: string | number; gate: string }) =>
+    fetchJson<PaperAccount>("/accounts", send("POST", body)),
+  updateAccount: (id: string, fields: Partial<PaperAccount>) =>
+    fetchJson<PaperAccount>(`/accounts/${encodeURIComponent(id)}`, send("PATCH", fields)),
+  deleteAccount: (id: string) =>
+    fetchJson<{ deleted: string }>(`/accounts/${encodeURIComponent(id)}`, send("DELETE")),
+  resetAccount: (id: string, startingEquity?: number) =>
+    fetchJson<{ closed_positions: number; equity: number }>(
+      `/accounts/${encodeURIComponent(id)}/reset`,
+      send("POST", { starting_equity: startingEquity ?? null }),
+    ),
   resetPaper: (startingEquity?: number) =>
     fetchJson<{ closed_positions: number; closed_calls: number; equity: number }>(
       "/paper/reset",
@@ -168,10 +182,10 @@ export async function streamChat(
   onEvent: (event: ChatEvent) => void,
   signal?: AbortSignal,
 ): Promise<void> {
-  const response = await fetch("/api/chat", {
-    ...send("POST", { message, conversation_id: conversationId }),
-    signal,
-  });
+  const response = await fetch(
+    "/api/chat",
+    accountHeaders({ ...send("POST", { message, conversation_id: conversationId }), signal }),
+  );
   if (!response.ok || !response.body) {
     throw new ApiError(response.status, (await response.text()) || response.statusText);
   }

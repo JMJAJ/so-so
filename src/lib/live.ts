@@ -13,7 +13,7 @@ interface LiveEvent {
 /** Which cached queries each kind of change makes stale (by query-key prefix). */
 const TOPIC_KEYS: Record<string, string[]> = {
   quotes: ["portfolio", "dashboard", "asset", "intraday", "universe", "briefs"],
-  portfolio: ["portfolio", "dashboard", "status", "track-record"],
+  portfolio: ["portfolio", "dashboard", "status", "track-record", "accounts"],
   recommendations: ["dashboard", "portfolio", "track-record", "briefs", "skills"],
   news: ["news", "events", "dashboard", "status"],
   settings: ["settings", "status"],

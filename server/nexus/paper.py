@@ -19,7 +19,7 @@ from datetime import datetime, timedelta, timezone
 
 import numpy as np
 
-from . import config, data, db, live, universe
+from . import accounts, config, data, db, live, universe
 from .ingest import prices
 
 SLIPPAGE_BPS = {"stock": 2.0, "etf": 1.0, "crypto": 10.0, "forex": 1.0, "commodity": 3.0}
@@ -82,11 +82,12 @@ def size_for(item: universe.Instrument, entry: float, stop: float, equity: float
     return quantity
 
 
-def correlated_risk(instrument_id: str, side: str) -> dict:
+def correlated_risk(instrument_id: str, side: str, account_id: str | None = None) -> dict:
     """How much of the book is already the same bet as a new `side` position in `instrument_id`.
     rho is the side-adjusted correlation of daily returns: +1 means the two positions win and
     lose together. Risk units = 1 (the new trade) + the sum of rho over same-bet positions."""
-    held = db.rows("SELECT instrument_id, side FROM positions WHERE instrument_id != ?", (instrument_id,))
+    held = db.rows("SELECT instrument_id, side FROM positions WHERE instrument_id != ? AND account_id=?",
+                   (instrument_id, account_id or accounts.current()))
     if not held:
         return {"units": 1.0, "same_bet": []}
     closes = data.closes()
@@ -111,19 +112,22 @@ def correlated_risk(instrument_id: str, side: str) -> dict:
 
 
 def open_position(instrument_id: str, side: str, *, stop: float, target: float | None, expires_at: str | None,
-                  recommendation_id: str | None = None, source: str = "manual", quantity: float | None = None) -> dict:
+                  recommendation_id: str | None = None, source: str = "manual", quantity: float | None = None,
+                  account_id: str | None = None) -> dict:
     item = universe.require(instrument_id)
     if not item.tradable:
         raise ValueError(f"{item.symbol} is research-only")
-    snapshot = portfolio(mark=False)
+    account = accounts.get(account_id)
+    snapshot = portfolio(mark=False, account_id=account["id"])
     open_count = snapshot["open_count"] + snapshot["pending_count"]
     if open_count >= config.get_int("max_positions"):
         raise ValueError("Position limit reached")
-    if db.one("SELECT 1 FROM positions WHERE instrument_id=?", (item.id,)):
-        raise ValueError(f"Already holding {item.symbol}")
-    risk = correlated_risk(item.id, side)
+    if db.one("SELECT 1 FROM positions WHERE instrument_id=? AND account_id=?", (item.id, account["id"])):
+        raise ValueError(f"Already holding {item.symbol} in {account['name']}")
+    risk = correlated_risk(item.id, side, account["id"])
     limit = config.get_float("max_correlated_risk")
-    if risk["units"] > limit:
+    # An "any" account takes concentrated bets on purpose; strict accounts don't.
+    if risk["units"] > limit and account["gate"] == "strict":
         bets = ", ".join(f"{r['symbol']} {r['side']} (rho {r['rho']:.2f})" for r in risk["same_bet"])
         raise ValueError(f"Correlated risk limit: {side} {item.symbol} is the same bet as {bets}; together "
                          f"{risk['units']:.1f} risk budgets, limit {limit:g}")
@@ -141,13 +145,15 @@ def open_position(instrument_id: str, side: str, *, stop: float, target: float |
         raise ValueError("Gross exposure limit reached")
     position_id = f"pos_{uuid.uuid4().hex[:10]}"
     db.execute(
-        """INSERT INTO positions(id,instrument_id,side,quantity,status,created_at,stop,target,expires_at,recommendation_id,source)
-           VALUES(?,?,?,?,?,?,?,?,?,?,?)""",
-        (position_id, item.id, side, qty, "pending", db.now_iso(), stop, target, expires_at, recommendation_id, source),
+        """INSERT INTO positions(id,instrument_id,side,quantity,status,created_at,stop,target,expires_at,recommendation_id,
+           source,account_id) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)""",
+        (position_id, item.id, side, qty, "pending", db.now_iso(), stop, target, expires_at, recommendation_id, source,
+         account["id"]),
     )
     _try_fill(db.one("SELECT * FROM positions WHERE id=?", (position_id,)), quote)
     live.publish("portfolio")
-    db.log("info", "order", f"{side.upper()} {qty:g} {item.symbol} (stop {stop:g}, target {target}) via {source}")
+    db.log("info", "order", f"{side.upper()} {qty:g} {item.symbol} (stop {stop:g}, target {target}) via {source} "
+                            f"[{account['name']}]")
     return db.one("SELECT * FROM positions WHERE id=?", (position_id,))
 
 
@@ -192,9 +198,10 @@ def close_position(position_id: str, *, reason: str = "manual", price: float | N
     with db.session() as conn:
         conn.execute(
             """INSERT INTO trades(id,position_id,instrument_id,side,quantity,entry_price,exit_price,opened_at,closed_at,
-               gross_pnl,fees,net_pnl,exit_reason,recommendation_id) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+               gross_pnl,fees,net_pnl,exit_reason,recommendation_id,account_id) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
             (trade_id, position_id, item.id, position["side"], position["quantity"], position["entry_price"], exit_price,
-             position["opened_at"], db.now_iso(), gross, fees, gross - fees, reason, position["recommendation_id"]),
+             position["opened_at"], db.now_iso(), gross, fees, gross - fees, reason, position["recommendation_id"],
+             position["account_id"]),
         )
         conn.execute("DELETE FROM positions WHERE id=?", (position_id,))
     db.log("info", "exit", f"Closed {item.symbol} @ {exit_price:.4f} ({reason}); net {gross - fees:+.2f}")
@@ -265,11 +272,12 @@ def _exit_check(position: dict, quote: dict | None) -> tuple[str | None, float |
 
 # ── Portfolio ────────────────────────────────────────────────────────────────
 
-def portfolio(*, mark: bool = True) -> dict:
-    start = config.get_float("starting_equity")
-    positions = db.rows("SELECT * FROM positions ORDER BY created_at DESC")
-    since = config.get("account_started_at")
-    realized = db.one("SELECT COALESCE(SUM(net_pnl),0) v FROM trades WHERE closed_at > ?", (since,))["v"]
+def portfolio(*, mark: bool = True, account_id: str | None = None) -> dict:
+    account = accounts.get(account_id)
+    start, since = account["starting_equity"], account["started_at"]
+    positions = db.rows("SELECT * FROM positions WHERE account_id=? ORDER BY created_at DESC", (account["id"],))
+    realized = db.one("SELECT COALESCE(SUM(net_pnl),0) v FROM trades WHERE account_id=? AND closed_at > ?",
+                      (account["id"], since))["v"]
     quote_map = prices.quotes([row["instrument_id"] for row in positions]) if (mark and positions) else {}
     unrealized = exposure = 0.0
     out_positions = []
@@ -291,10 +299,11 @@ def portfolio(*, mark: bool = True) -> dict:
             "quote_as_of": quote.get("as_of") if quote else None,
         })
     equity = start + realized + unrealized
-    trades = db.rows("SELECT net_pnl FROM trades WHERE closed_at > ?", (since,))
+    trades = db.rows("SELECT net_pnl FROM trades WHERE account_id=? AND closed_at > ?", (account["id"], since))
     wins = [t["net_pnl"] for t in trades if t["net_pnl"] > 0]
     losses = [t["net_pnl"] for t in trades if t["net_pnl"] < 0]
     return {
+        "account": {k: account[k] for k in ("id", "name", "gate", "autopilot")},
         "starting_equity": start, "equity": equity, "cash": equity - exposure, "realized": realized,
         "unrealized": unrealized, "exposure": exposure, "exposure_pct": exposure / equity * 100 if equity else 0,
         "return_pct": (equity / start - 1) * 100,
@@ -306,18 +315,22 @@ def portfolio(*, mark: bool = True) -> dict:
     }
 
 
-def snapshot_equity() -> None:
-    state = portfolio()
+def snapshot_equity(account_id: str | None = None) -> None:
+    """Today's equity for one account, or for every account when none is given (daily job)."""
     spy = db.one("SELECT close FROM bars WHERE instrument_id='etf:spy' ORDER BY date DESC LIMIT 1")
-    db.execute(
-        "INSERT OR REPLACE INTO equity_snapshots(date,equity,cash,exposure,spy_close) VALUES(?,?,?,?,?)",
-        (db.today(), state["equity"], state["cash"], state["exposure"], spy["close"] if spy else None),
-    )
+    targets = [account_id] if account_id else [a["id"] for a in accounts.all_accounts()]
+    for target in targets:
+        state = portfolio(account_id=target)
+        db.execute(
+            "INSERT OR REPLACE INTO equity_snapshots(account_id,date,equity,cash,exposure,spy_close) VALUES(?,?,?,?,?,?)",
+            (target, db.today(), state["equity"], state["cash"], state["exposure"], spy["close"] if spy else None),
+        )
 
 
-def equity_curve() -> list[dict]:
-    rows = db.rows("SELECT * FROM equity_snapshots WHERE date >= ? ORDER BY date",
-                   (config.get("account_started_at")[:10],))
+def equity_curve(account_id: str | None = None) -> list[dict]:
+    account = accounts.get(account_id)
+    rows = db.rows("SELECT * FROM equity_snapshots WHERE account_id=? AND date >= ? ORDER BY date",
+                   (account["id"], account["started_at"][:10]))
     if not rows:
         return []
     base_equity, base_spy = rows[0]["equity"], rows[0]["spy_close"]
@@ -328,30 +341,24 @@ def equity_curve() -> list[dict]:
     } for row in rows]
 
 
-def reset_account(starting_equity: float | None = None) -> dict:
-    """Start the paper account over: close every position and open call at the current price
-    (exit reason 'reset', so the track record keeps them), then count only what comes after."""
-    from . import recommendations
-
+def reset_account(starting_equity: float | None = None, account_id: str | None = None) -> dict:
+    """Start one paper account over: close its positions at the current price (exit reason
+    'reset'), then count only what comes after. Shared AI calls are left alone."""
+    account = accounts.get(account_id)
     closed_positions = 0
-    for position in db.rows("SELECT id FROM positions"):
+    for position in db.rows("SELECT id FROM positions WHERE account_id=?", (account["id"],)):
         try:
             close_position(position["id"], reason="reset")
             closed_positions += 1
         except (KeyError, ValueError) as exc:
             db.execute("DELETE FROM positions WHERE id=?", (position["id"],))
             db.log("warn", "reset", f"{position['id']}: removed without a fill ({exc})")
-    closed_calls = recommendations.close_all_open("reset")
-    values = {"account_started_at": db.now_iso()}
-    if starting_equity is not None:
-        values["starting_equity"] = str(starting_equity)
-    config.set_many(values)
-    db.execute("DELETE FROM equity_snapshots WHERE date >= ?", (db.today(),))
-    snapshot_equity()
-    db.log("info", "reset", f"Paper account reset: {closed_positions} positions and {closed_calls} calls closed")
+    accounts.mark_reset(account["id"], starting_equity)
+    db.execute("DELETE FROM equity_snapshots WHERE account_id=? AND date >= ?", (account["id"], db.today()))
+    snapshot_equity(account["id"])
+    db.log("info", "reset", f"{account['name']} reset: {closed_positions} positions closed")
     live.publish("portfolio")
-    live.publish("recommendations")
-    return {"closed_positions": closed_positions, "closed_calls": closed_calls, **portfolio(mark=False)}
+    return {"closed_positions": closed_positions, **portfolio(mark=False, account_id=account["id"])}
 
 
 def expiry_from_now(horizon_days: int) -> str:

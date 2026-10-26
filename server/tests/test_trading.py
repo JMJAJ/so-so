@@ -133,7 +133,7 @@ def test_untraded_call_is_replaced_not_blocking(synthetic):
     assert recommendations.get(old["id"])["exit_reason"] == "superseded" and new["status"] == "open"
     traded = recommendations.trade(new["id"])
     assert traded["traded"] is True
-    with pytest.raises(ValueError, match="paper position"):
+    with pytest.raises(ValueError, match="Already holding AAPL in this account"):
         _call("stock:aapl", auto_trade=False)
 
 
@@ -142,9 +142,43 @@ def test_reset_starts_a_clean_account(synthetic):
     _call("stock:jpm", auto_trade=False)
     assert paper.portfolio()["open_count"] + paper.portfolio()["pending_count"] == 1
     result = paper.reset_account(983)
-    assert result["closed_positions"] == 1 and result["closed_calls"] == 2
+    assert result["closed_positions"] == 1
     state = paper.portfolio()
     assert state["equity"] == pytest.approx(983) and state["trade_count"] == 0 and not state["positions"]
-    assert recommendations.list_recs("open") == []
-    assert {r["exit_reason"] for r in recommendations.list_recs("closed")} == {"reset"}
+    assert len(recommendations.list_recs("open")) == 2  # shared AI calls are research, not the account's
     assert len(paper.equity_curve()) == 1
+
+
+
+def test_accounts_are_isolated(synthetic):
+    from nexus import accounts
+
+    _call("stock:msft", auto_trade=True)  # Main
+    second = accounts.create("Small bets", "2,500", gate="any")
+    with accounts.use(second["id"]):
+        state = paper.portfolio()
+        assert state["starting_equity"] == 2500 and state["equity"] == 2500 and not state["positions"]
+        rec = recommendations.list_recs("open")[0]
+        assert rec["traded"] is False  # traded in Main, not here
+        recommendations.trade(rec["id"])  # same call, second account
+        assert paper.portfolio()["open_count"] + paper.portfolio()["pending_count"] == 1
+        paper.reset_account()
+        assert not paper.portfolio()["positions"]
+    assert paper.portfolio()["open_count"] + paper.portfolio()["pending_count"] == 1  # Main untouched
+    with pytest.raises(ValueError, match="can't be deleted"):
+        accounts.delete("main")
+    accounts.delete(second["id"])
+    assert [a["id"] for a in accounts.all_accounts()] == ["main"]
+
+
+def test_old_equity_snapshots_migrate_to_main(nexus_db):
+    with db.session() as conn:
+        conn.executescript("""
+            DROP TABLE equity_snapshots;
+            CREATE TABLE equity_snapshots (date TEXT PRIMARY KEY, equity REAL NOT NULL, cash REAL NOT NULL,
+                                           exposure REAL NOT NULL, spy_close REAL) WITHOUT ROWID;
+            INSERT INTO equity_snapshots VALUES ('2026-10-20', 100000, 50000, 50000, 700);
+        """)
+    db.init_db()
+    rows = db.rows("SELECT account_id, date, equity FROM equity_snapshots")
+    assert rows == [{"account_id": "main", "date": "2026-10-20", "equity": 100000}]

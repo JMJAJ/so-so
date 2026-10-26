@@ -4,6 +4,8 @@ import { useEffect, useState, type ReactNode } from "react";
 import { toast } from "sonner";
 
 import { Markdown } from "@/features/shell/Markdown";
+
+import { AccountsPanel } from "./AccountsPanel";
 import {
   Badge,
   ErrorNote,
@@ -34,6 +36,7 @@ export default function SettingsView() {
         title="Settings & system"
         subtitle="AI provider, risk, universe and the background jobs that keep the research current."
       />
+      <AccountsPanel />
       <SettingsForm />
       <JobsPanel />
       <RunsPanel />
@@ -59,16 +62,6 @@ function SettingsForm() {
     onSuccess: () => {
       toast.success("Settings saved");
       setSecrets({});
-      void client.invalidateQueries();
-    },
-    onError: (error: Error) => toast.error(error.message),
-  });
-  const reset = useMutation({
-    mutationFn: () => api.resetPaper(Number(values.starting_equity) || undefined),
-    onSuccess: (result) => {
-      toast.success(
-        `Paper account reset to $${result.equity.toLocaleString()}: closed ${result.closed_positions} positions and ${result.closed_calls} calls`,
-      );
       void client.invalidateQueries();
     },
     onError: (error: Error) => toast.error(error.message),
@@ -193,45 +186,6 @@ function SettingsForm() {
 
       <Panel title="Paper trading & research">
         <div className="grid gap-3 sm:grid-cols-2">
-          <Field label="Autopilot" hint="Open a paper position for every recommendation">
-            <select
-              className="terminal-select"
-              value={values.autopilot}
-              onChange={(e) => set("autopilot", e.target.value)}
-            >
-              <option value="true">On</option>
-              <option value="false">Off (track calls only)</option>
-            </select>
-          </Field>
-          <Field
-            label="Starting money"
-            hint="$ in the paper account. Equity = this + realized + open P&L, so a change applies at once; open positions keep their size."
-          >
-            <input
-              className="terminal-input"
-              type="number"
-              step="100"
-              min="100"
-              value={values.starting_equity ?? ""}
-              onChange={(e) => set("starting_equity", e.target.value)}
-            />
-            <button
-              type="button"
-              className="secondary-button mt-2 !px-2 !py-1 hover:!border-bear hover:!text-bear"
-              disabled={reset.isPending}
-              onClick={() => {
-                const amount = Number(values.starting_equity);
-                if (
-                  window.confirm(
-                    `Reset the paper account to $${amount.toLocaleString()}? Every open position and call is closed at the current price (kept in the track record as "reset"), and the portfolio starts over.`,
-                  )
-                )
-                  reset.mutate();
-              }}
-            >
-              {reset.isPending ? "Resetting…" : "Reset paper account to this amount"}
-            </button>
-          </Field>
           <Field label="Risk per trade" hint="Fraction of equity lost if the stop is hit">
             <input
               className="terminal-input"

@@ -304,3 +304,34 @@ def test_postmortems_write_lessons(synthetic, favourable, monkeypatch):
     assert "post-mortem" not in provider.calls[0]["system"][:20] and "two sentences" in provider.calls[0]["system"]
     assert "Analogs alone" in db.one("SELECT lesson FROM recommendations")["lesson"]
     assert "Recent post-mortems" in recommendations.lessons()
+
+
+
+def test_any_gate_account_records_failing_trades(synthetic):
+    from nexus import accounts
+
+    risky = accounts.create("Anything goes", 1000, gate="any", autopilot=True)
+    with accounts.use(risky["id"]):
+        text, is_error = tools.call("propose_recommendation", _proposal("stock:msft"), extra={"_source": "chat"})
+    assert not is_error, text
+    result = json.loads(text)
+    assert result["gate"].startswith("OVERRIDDEN") and result["account"] == "Anything goes"
+    rec = db.one("SELECT evidence, confidence FROM recommendations")
+    assert "gate_override" in rec["evidence"] and rec["confidence"] == "low"
+    # The same failing trade is still refused for a strict account, and for the unattended analyst.
+    text, is_error = tools.call("propose_recommendation", _proposal("stock:jpm"), extra={"_source": "chat"})
+    assert is_error and "Not recorded" in text
+    with accounts.use(risky["id"]):
+        text, is_error = tools.call("propose_recommendation", _proposal("stock:nvda"), extra={"_source": "analyst"})
+    assert is_error
+
+
+def test_accounts_api_and_header(client):
+    created = client.post("/api/accounts", json={"name": "Side", "starting_equity": 500, "gate": "any"}).json()
+    listing = client.get("/api/accounts").json()
+    assert {a["name"] for a in listing["accounts"]} == {"Main", "Side"} and listing["current"] == "main"
+    portfolio = client.get("/api/portfolio", headers={"X-Nexus-Account": created["id"]}).json()
+    assert portfolio["account"]["name"] == "Side" and portfolio["equity"] == 500
+    assert client.get("/api/portfolio", headers={"X-Nexus-Account": "gone"}).json()["account"]["id"] == "main"
+    assert client.patch(f"/api/accounts/{created['id']}", json={"gate": "nope"}).status_code == 400
+    assert client.delete("/api/accounts/main").status_code == 400

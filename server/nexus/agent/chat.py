@@ -9,7 +9,7 @@ from __future__ import annotations
 import uuid
 from typing import Callable
 
-from .. import config, db, llm, recommendations
+from .. import accounts, config, db, llm, paper, recommendations
 from . import loop, tools
 
 SLASH = {
@@ -55,6 +55,19 @@ def expand(text: str) -> str:
     if command.lower() == "/chart":
         return template.format(arg=arg or "my paper equity vs the S&P 500")
     return template.format(arg=arg or "the strongest current candidate")
+
+
+def _account_note() -> str:
+    account = accounts.get()
+    state = paper.portfolio(mark=False, account_id=account["id"])
+    note = (f"Paper account in use: {account['name']} (equity ${state['equity']:,.2f}, "
+            f"{state['open_count'] + state['pending_count']} positions, autopilot "
+            f"{'on' if account['autopilot'] else 'off'}, trade gate {account['gate']}).")
+    if account["gate"] == "any":
+        note += (" This account accepts any trade: when the user explicitly asks you to open a trade, run the "
+                 "checklist, tell them which checks fail and the computed probability and expected value, then "
+                 "call propose_recommendation anyway. Never claim a failing trade has an edge.")
+    return note
 
 
 def new_conversation(title: str = "New chat") -> str:
@@ -106,7 +119,8 @@ def send(conv_id: str | None, text: str, on_event: Callable[[dict], None] | None
         user["display"] = text
     messages.append(user)
     stored_from = len(messages) - 1
-    system = loop.system_prompt(CHAT_EXTRA + "\n\nTrack record so far:\n" + recommendations.lessons())
+    system = loop.system_prompt(CHAT_EXTRA + "\n\n" + _account_note() + "\n\nTrack record so far:\n"
+                                + recommendations.lessons())
     try:
         loop.run(llm.create("main"), system, messages, tool_specs=tools.specs(), on_event=on_event,
                  tool_extra={"_source": "chat"}, effort="medium", max_steps=40)
