@@ -43,38 +43,41 @@ export default function AppShell() {
 
   return (
     <div className={cn("min-h-screen transition-[padding]", drawerOpen && "sm:pr-[460px]")}>
-      <aside className="fixed inset-y-0 left-0 z-30 hidden w-52 flex-col border-r border-border bg-background/95 lg:flex">
-        <Brand />
-        <nav className="flex-1 space-y-0.5 px-2 py-3">
+      <aside className="fixed inset-y-0 left-0 z-30 hidden w-[88px] flex-col items-center gap-2.5 border-r border-border bg-background py-5 lg:flex">
+        <Brand status={status.data} />
+        <nav aria-label="Main" className="flex flex-1 flex-col items-center gap-2">
           {(Object.keys(VIEWS) as View[]).map((key) => {
             const Icon = VIEWS[key].icon;
+            const active = view === key;
             return (
               <button
                 key={key}
                 onClick={() => go(key)}
                 onMouseEnter={() => warm(key)}
                 onFocus={() => warm(key)}
+                aria-label={VIEWS[key].label}
+                aria-current={active ? "page" : undefined}
+                title={VIEWS[key].label}
                 className={cn(
-                  "flex w-full items-center gap-2.5 px-3 py-2 text-left text-[11px] font-bold uppercase tracking-[0.12em] transition-colors",
-                  view === key
-                    ? "bg-primary/10 text-primary"
-                    : "text-muted-foreground hover:bg-accent/40 hover:text-foreground",
+                  "grid h-12 w-12 place-items-center rounded-[14px] transition-colors",
+                  active
+                    ? "bg-primary text-primary-foreground"
+                    : "bg-raised text-muted-foreground hover:bg-accent hover:text-foreground",
                 )}
               >
-                <Icon className="h-3.5 w-3.5" /> {VIEWS[key].label}
+                <Icon className="h-5 w-5" />
               </button>
             );
           })}
         </nav>
-        <SystemFooter status={status.data} />
       </aside>
 
-      <div className="lg:pl-52">
-        <header className="sticky top-0 z-20 flex items-center gap-2 border-b border-border bg-background/90 px-4 py-2 backdrop-blur">
+      <div className="lg:pl-[88px]">
+        <header className="sticky top-0 z-20 flex flex-wrap items-center gap-2.5 border-b border-border bg-background/95 px-4 py-3 backdrop-blur lg:px-7">
           <div className="lg:hidden">
-            <Brand compact />
+            <Brand status={status.data} compact />
           </div>
-          <nav className="flex min-w-0 flex-1 gap-1 overflow-x-auto lg:hidden">
+          <nav aria-label="Main" className="flex min-w-0 flex-1 gap-1.5 overflow-x-auto lg:hidden">
             {(Object.keys(VIEWS) as View[]).map((key) => {
               const Icon = VIEWS[key].icon;
               return (
@@ -84,45 +87,38 @@ export default function AppShell() {
                   onTouchStart={() => warm(key)}
                   className={cn(
                     "icon-button shrink-0",
-                    view === key && "!border-primary !text-primary",
+                    view === key && "!border-primary !bg-primary !text-primary-foreground",
                   )}
                   aria-label={VIEWS[key].label}
                 >
-                  <Icon className="h-3.5 w-3.5" />
+                  <Icon className="h-4 w-4" />
                 </button>
               );
             })}
           </nav>
-          <div className="hidden flex-1 lg:block">
+          <div className="hidden min-w-0 flex-1 lg:block">
             <BootstrapBanner status={status.data} />
           </div>
+          {status.data?.analyst_running && (
+            <span className="flex items-center gap-1.5 text-xs font-semibold text-bull">
+              <Loader2 className="h-3.5 w-3.5 animate-spin" /> Analyst researching
+            </span>
+          )}
           <AccountSwitcher />
-          <LiveDot live={live} />
           {!status.error && (
             <MarketChip marketId="nyse" className="hidden shrink-0 md:inline-flex" />
           )}
-          {status.error ? (
-            <span className="text-[10px] font-bold uppercase tracking-[0.15em] text-bear">
-              backend offline
-            </span>
-          ) : status.data?.analyst_running ? (
-            <span className="flex items-center gap-1.5 text-[10px] uppercase tracking-[0.15em] text-primary">
-              <Loader2 className="h-3 w-3 animate-spin" /> analyst researching
-            </span>
-          ) : null}
+          <LiveDot live={live} offline={Boolean(status.error)} />
           {view !== "chat" && (
             <button
-              className={cn(
-                "primary-button inline-flex items-center gap-1.5",
-                drawerOpen && "!bg-primary/25",
-              )}
+              className={cn("primary-button", drawerOpen && "!bg-[#1e6e37]")}
               onClick={() => chat.setOpen(!chat.open)}
             >
-              <MessageSquare className="h-3.5 w-3.5" /> Ask AI
+              <MessageSquare className="h-4 w-4" /> Ask AI
             </button>
           )}
         </header>
-        <main className="mx-auto max-w-[1600px] px-4 py-5">
+        <main className="mx-auto max-w-[1600px] px-4 py-6 lg:px-7">
           <div className="mb-3 lg:hidden">
             <BootstrapBanner status={status.data} />
           </div>
@@ -140,84 +136,42 @@ export default function AppShell() {
   );
 }
 
-function LiveDot({ live }: { live: LiveState }) {
+function LiveDot({ live, offline }: { live: LiveState; offline: boolean }) {
   const last = live.lastEventAt
     ? ` (last update ${new Date(live.lastEventAt).toLocaleTimeString()})`
     : "";
+  const on = live.connected && !offline;
   return (
     <span
-      className="flex shrink-0 items-center gap-1.5 text-[10px] font-bold uppercase tracking-[0.15em]"
+      className={cn(
+        "inline-flex min-h-10 shrink-0 items-center gap-2 rounded-xl border px-3 text-xs font-semibold",
+        on ? "border-[#1f3a27] bg-[#0f1a12] text-bull" : "border-border text-muted-foreground",
+      )}
       title={
-        live.connected
+        on
           ? `Live: pages refresh as soon as data changes${last}`
-          : "Reconnecting to live updates; pages still refresh on a timer"
+          : offline
+            ? "Backend offline"
+            : "Reconnecting to live updates; pages still refresh on a timer"
       }
     >
-      <span
-        className={cn(
-          "h-1.5 w-1.5 rounded-full",
-          live.connected ? "animate-pulse bg-bull" : "bg-muted-foreground",
-        )}
-      />
-      <span className={live.connected ? "text-bull" : "text-muted-foreground"}>
-        {live.connected ? "live" : "offline"}
-      </span>
+      <span className={cn("h-1.5 w-1.5 rounded-full", on ? "bg-bull" : "bg-bear")} />
+      {on ? "Live" : offline ? "Backend offline" : "Reconnecting"}
     </span>
   );
 }
 
-function Brand({ compact = false }: { compact?: boolean }) {
+function Brand({ status, compact = false }: { status?: SystemStatus; compact?: boolean }) {
+  const llm = status ? `AI: ${status.llm.provider} · ${status.llm.model}` : "NEXUS";
   return (
     <div
-      className={cn("flex items-center gap-2", compact ? "" : "border-b border-border px-4 py-4")}
+      title={llm}
+      className={cn(
+        "grid place-items-center rounded-[14px] border-[1.5px] border-foreground",
+        compact ? "h-10 w-10" : "mb-3 h-12 w-12",
+      )}
     >
-      <BarChart3 className="h-4 w-4 text-primary" />
-      <div>
-        <div className="font-display text-sm font-bold tracking-[0.25em]">NEXUS</div>
-        {!compact && (
-          <div className="text-[9px] uppercase tracking-[0.2em] text-muted-foreground">
-            evidence-based research
-          </div>
-        )}
-      </div>
-    </div>
-  );
-}
-
-function SystemFooter({ status }: { status?: SystemStatus }) {
-  if (!status) return null;
-  const c = status.coverage;
-  return (
-    <div className="space-y-1 border-t border-border px-4 py-3 text-[9px] uppercase tracking-[0.12em] text-muted-foreground">
-      <div className="flex justify-between">
-        <span>LLM</span>
-        <span className={status.llm.key_set ? "text-bull" : "text-bear"}>
-          {status.llm.provider}
-        </span>
-      </div>
-      <div className="truncate normal-case tracking-normal">{status.llm.model}</div>
-      <div className="flex justify-between">
-        <span>Prices</span>
-        <span>{c.last_bar ?? "—"}</span>
-      </div>
-      <div className="flex justify-between">
-        <span>Events</span>
-        <span>{c.events.toLocaleString()}</span>
-      </div>
-      <div className="flex justify-between">
-        <span>Headlines</span>
-        <span>{c.news.toLocaleString()}</span>
-      </div>
-      <div className="flex justify-between">
-        <span>GDELT days</span>
-        <span>{c.gdelt_days}</span>
-      </div>
-      <div className="flex justify-between">
-        <span>Autopilot</span>
-        <span className={status.autopilot ? "text-primary" : ""}>
-          {status.autopilot ? "on" : "off"}
-        </span>
-      </div>
+      <BarChart3 className="h-5 w-5" aria-label="NEXUS" />
     </div>
   );
 }
@@ -227,8 +181,8 @@ function BootstrapBanner({ status }: { status?: SystemStatus }) {
   if (status && !status.has_data) {
     const init = status.jobs.find((job) => job.name === "init");
     return (
-      <div className="flex items-center gap-2 border border-primary/40 bg-primary/5 px-3 py-1.5 text-[11px]">
-        <Loader2 className="h-3 w-3 animate-spin text-primary" />
+      <div className="flex items-center gap-2 rounded-xl border border-[#1f3a27] bg-[#0f1a12] px-3 py-2 text-xs">
+        <Loader2 className="h-3 w-3 animate-spin text-bull" />
         <span>
           First run: downloading 10 years of history and building event studies (10–20 min).{" "}
           <span className="text-muted-foreground">
@@ -241,27 +195,28 @@ function BootstrapBanner({ status }: { status?: SystemStatus }) {
   }
   if (running.length) {
     return (
-      <div className="truncate text-[10px] text-muted-foreground">
+      <div className="truncate text-xs text-muted-foreground">
         {running.map((job) => `${job.name}: ${job.progress ?? "running"}`).join(" · ")}
       </div>
     );
   }
   const news = status?.jobs.find((job) => job.name === "news");
   return news ? (
-    <div className="text-[10px] text-muted-foreground">news updated {ago(news.last_finished)}</div>
+    <div className="text-xs text-muted-foreground">News updated {ago(news.last_finished)}</div>
   ) : null;
 }
 
 function Offline() {
   return (
     <div className="terminal-panel mx-auto mt-10 max-w-lg p-6 text-center">
-      <div className="text-[10px] font-bold uppercase tracking-[0.2em] text-bear">
-        Backend offline
-      </div>
-      <p className="mt-3 text-xs leading-relaxed text-muted-foreground">
+      <div className="text-base font-bold text-bear">Backend offline</div>
+      <p className="mt-3 text-sm leading-relaxed text-muted-foreground">
         Start the Python server:{" "}
-        <code className="text-primary">cd server && python -m uvicorn main:app --port 8000</code>,
-        or run <code className="text-primary">.\start-nexus.ps1</code> from the project root.
+        <code className="font-mono text-bull">
+          cd server && python -m uvicorn main:app --port 8000
+        </code>
+        , or run <code className="font-mono text-bull">.\start-nexus.ps1</code> from the project
+        root.
       </p>
     </div>
   );

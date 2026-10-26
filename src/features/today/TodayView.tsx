@@ -159,13 +159,11 @@ function RegimeStrip({ data }: { data: Dashboard }) {
   return (
     <section className="terminal-panel flex flex-wrap items-stretch">
       <div className="flex min-w-[140px] flex-col justify-center border-r border-border px-4 py-3">
-        <div className="text-[9px] font-bold uppercase tracking-[0.18em] text-muted-foreground">
-          Regime
-        </div>
+        <div className="text-[11px] font-bold text-muted-foreground">Regime</div>
         <Badge tone={riskTone} className="mt-1 self-start text-[11px]">
           {regime.risk}
         </Badge>
-        <div className="mt-1 text-[10px] text-muted-foreground">
+        <div className="mt-1 text-xs text-muted-foreground">
           as of {shortDate(data.regime?.as_of)}
         </div>
       </div>
@@ -174,9 +172,7 @@ function RegimeStrip({ data }: { data: Dashboard }) {
           key={cell.label}
           className="min-w-[120px] flex-1 border-r border-border/60 px-3 py-2.5 last:border-r-0"
         >
-          <div className="text-[9px] uppercase tracking-[0.15em] text-muted-foreground">
-            {cell.label}
-          </div>
+          <div className="text-[11px] text-muted-foreground">{cell.label}</div>
           <div className={cn("text-sm font-bold tabular-nums", cell.className)}>{cell.value}</div>
           {cell.spark && <Sparkline values={cell.spark.slice(-120)} color={chartColors.MUTED} />}
         </div>
@@ -278,14 +274,14 @@ function IdeasPanel({ ideas }: { ideas: Forecast[] }) {
               >
                 <Td>
                   <span className="font-bold">{idea.symbol}</span>{" "}
-                  <span className="text-[10px] text-muted-foreground">{idea.asset_class}</span>
+                  <span className="text-xs text-muted-foreground">{idea.asset_class}</span>
                 </Td>
                 <Td right>{price(idea.price)}</Td>
                 <Td right className={tone(idea.expected_return)}>
                   {pct(idea.expected_return)}
                   {!idea.model_has_edge && (
                     <span
-                      className="ml-1 text-[9px] text-muted-foreground"
+                      className="ml-1 text-[11px] text-muted-foreground"
                       title="No validated model edge"
                     >
                       *
@@ -293,7 +289,7 @@ function IdeasPanel({ ideas }: { ideas: Forecast[] }) {
                   )}
                 </Td>
                 <Td right>{pct(idea.prob_up, 0, false)}</Td>
-                <Td className="max-w-[180px] truncate text-[10px] text-muted-foreground">
+                <Td className="max-w-[180px] truncate text-xs text-muted-foreground">
                   {driverText(idea)}
                 </Td>
               </tr>
@@ -301,7 +297,7 @@ function IdeasPanel({ ideas }: { ideas: Forecast[] }) {
           </tbody>
         </TableWrap>
       )}
-      <p className="mt-2 text-[10px] text-muted-foreground">
+      <p className="mt-2 text-xs text-muted-foreground">
         * asset class has no validated model edge; the number is just the base rate.
       </p>
     </Panel>
@@ -339,11 +335,11 @@ function EventsPanel({ events }: { events: MarketEvent[] }) {
             <li key={event.id} className="border-b border-border/50 pb-2 last:border-0">
               <div className="flex flex-wrap items-center gap-2">
                 <EventBadge type={event.type} />
-                <span className="text-[10px] text-muted-foreground">{shortDate(event.date)}</span>
+                <span className="text-xs text-muted-foreground">{shortDate(event.date)}</span>
               </div>
               <div className="mt-1 text-xs">{event.title}</div>
               {event.impact && (
-                <div className="mt-1 flex flex-wrap items-center gap-2 text-[10px] text-muted-foreground">
+                <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
                   <span>
                     Past {event.impact.n}×, {event.impact_on?.split(":")[1]?.toUpperCase()} next
                     20d: avg{" "}
@@ -365,7 +361,7 @@ function EventsPanel({ events }: { events: MarketEvent[] }) {
                     <button
                       key={asset.instrument_id}
                       onClick={() => openAsset(asset.instrument_id)}
-                      className="border border-border px-1.5 py-0.5 text-[10px] hover:border-primary"
+                      className="rounded-lg border border-border px-1.5 py-0.5 text-xs hover:border-[#2f352f]"
                       title={`edge ${pct(asset.edge)} · t=${asset.t_stat.toFixed(1)} · n=${asset.n}`}
                     >
                       {asset.symbol} <span className={tone(asset.edge)}>{pct(asset.edge, 1)}</span>
@@ -402,7 +398,7 @@ export function HeadlinesPanel({
         <ul className="space-y-2">
           {items.map((item) => (
             <li key={item.id} className="border-b border-border/50 pb-2 last:border-0">
-              <div className="flex flex-wrap items-center gap-1.5 text-[10px] text-muted-foreground">
+              <div className="flex flex-wrap items-center gap-1.5 text-xs text-muted-foreground">
                 {item.category && item.category !== "other" && <EventBadge type={item.category} />}
                 {item.direction ? (
                   <span className={tone(item.direction)}>
@@ -418,16 +414,16 @@ export function HeadlinesPanel({
                 href={item.url ?? undefined}
                 target="_blank"
                 rel="noreferrer"
-                className="mt-0.5 block text-xs hover:text-primary"
+                className="mt-0.5 block text-xs hover:text-bull"
               >
                 {item.title}
               </a>
               {(item.affected.length > 0 || item.historical_analogs.length > 0) && (
-                <div className="mt-1 flex flex-wrap gap-1 text-[10px]">
+                <div className="mt-1 flex flex-wrap gap-1 text-xs">
                   {item.affected.map((id) => (
                     <button
                       key={id}
-                      className="border border-border px-1 hover:border-primary"
+                      className="rounded-lg border border-border px-1 hover:border-[#2f352f]"
                       onClick={() => openAsset(id)}
                     >
                       {id.split(":")[1]?.toUpperCase()}

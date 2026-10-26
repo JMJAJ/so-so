@@ -2,23 +2,26 @@
 @source "../src";
 @import "tw-animate-css";
 
+@import "@fontsource/quicksand/500.css";
+@import "@fontsource/quicksand/600.css";
+@import "@fontsource/quicksand/700.css";
 @import "@fontsource/jetbrains-mono/400.css";
 @import "@fontsource/jetbrains-mono/500.css";
 @import "@fontsource/jetbrains-mono/700.css";
-@import "@fontsource/space-grotesk/500.css";
-@import "@fontsource/space-grotesk/700.css";
 
 @custom-variant dark (&:is(.dark *));
 
+/* Dark Pro: near-black panels with thin borders, one flat green accent, no glow.
+   Quicksand for text, JetBrains Mono for prices and figures. */
 @theme inline {
+  --font-sans: "Quicksand", system-ui, sans-serif;
+  --font-display: "Quicksand", system-ui, sans-serif;
   --font-mono: "JetBrains Mono", ui-monospace, monospace;
-  --font-display: "Space Grotesk", system-ui, sans-serif;
-  --font-sans: "JetBrains Mono", ui-monospace, monospace;
 
-  --radius-sm: 2px;
-  --radius-md: 3px;
-  --radius-lg: 4px;
-  --radius-xl: 6px;
+  --radius-sm: 8px;
+  --radius-md: 10px;
+  --radius-lg: 14px;
+  --radius-xl: 20px;
 
   --color-background: var(--background);
   --color-foreground: var(--foreground);
@@ -45,47 +48,50 @@
   --color-amber: var(--amber);
   --color-grid: var(--grid);
   --color-glow: var(--glow);
+  --color-panel: var(--panel);
+  --color-raised: var(--raised);
 }
 
 :root {
-  --radius: 3px;
+  --radius: 14px;
 
-  /* Bloomberg-inspired: pure black, amber accent, terminal green/red */
-  --background: oklch(0.10 0 0);
-  --foreground: oklch(0.92 0.01 90);
-  --card: oklch(0.13 0 0);
-  --card-foreground: oklch(0.92 0.01 90);
-  --popover: oklch(0.13 0 0);
-  --popover-foreground: oklch(0.92 0.01 90);
+  --background: #0a0b0a;
+  --foreground: #e7e9e7;
+  --card: #0e100e;
+  --card-foreground: #e7e9e7;
+  --popover: #121412;
+  --popover-foreground: #e7e9e7;
+  --panel: #0e100e;
+  --raised: #151815;
 
-  --primary: oklch(0.78 0.16 75);            /* amber #f59e0b */
-  --primary-foreground: oklch(0.10 0 0);
+  --primary: #2e9a4e;                 /* flat green accent */
+  --primary-foreground: #ffffff;
 
-  --secondary: oklch(0.18 0 0);
-  --secondary-foreground: oklch(0.92 0.01 90);
-  --muted: oklch(0.16 0 0);
-  --muted-foreground: oklch(0.58 0.01 90);
-  --accent: oklch(0.22 0.03 80);
-  --accent-foreground: oklch(0.92 0.01 90);
+  --secondary: #151815;
+  --secondary-foreground: #e7e9e7;
+  --muted: #141714;
+  --muted-foreground: #8b918b;        /* 6:1 on the panels */
+  --accent: #1a1d1a;
+  --accent-foreground: #e7e9e7;
 
-  --destructive: oklch(0.62 0.22 25);
-  --destructive-foreground: oklch(0.98 0 0);
+  --destructive: #e5534b;
+  --destructive-foreground: #ffffff;
 
-  --border: oklch(0.22 0 0);
-  --input: oklch(0.20 0 0);
-  --ring: oklch(0.78 0.16 75);
+  --border: #1f231f;
+  --input: #111311;
+  --ring: #4fc277;
 
-  --bull: oklch(0.74 0.18 152);              /* terminal green #10b981 */
-  --bear: oklch(0.65 0.24 25);               /* red */
-  --amber: oklch(0.78 0.16 75);
-  --grid: oklch(0.20 0 0);
-  --glow: oklch(0.78 0.16 75 / 30%);
+  --bull: #5cc982;                    /* gains, text and fills */
+  --bear: #ef7468;                    /* losses */
+  --amber: #e2b04f;                   /* caution only */
+  --grid: #171a17;
+  --glow: transparent;
 
-  --chart-1: oklch(0.78 0.16 75);
-  --chart-2: oklch(0.74 0.18 152);
-  --chart-3: oklch(0.65 0.24 25);
-  --chart-4: oklch(0.70 0.14 220);
-  --chart-5: oklch(0.75 0.14 300);
+  --chart-1: #5cc982;
+  --chart-2: #e7e9e7;
+  --chart-3: #ef7468;
+  --chart-4: #6fa8dc;
+  --chart-5: #b38ad9;
 }
 
 @layer base {
@@ -96,82 +102,88 @@
   html, body {
     background-color: var(--color-background);
     color: var(--color-foreground);
-    font-family: var(--font-mono);
-    font-feature-settings: "ss01", "cv02", "tnum";
+    font-family: var(--font-sans);
+    font-weight: 500;
+    font-feature-settings: "tnum";
     min-width: 0;
     max-width: 100%;
     overflow-x: hidden;
-  }
-
-  body {
-    background-image:
-      radial-gradient(circle at 0% 0%, oklch(0.78 0.16 75 / 0.06) 0%, transparent 40%),
-      radial-gradient(circle at 100% 100%, oklch(0.74 0.18 152 / 0.04) 0%, transparent 40%),
-      linear-gradient(var(--grid) 1px, transparent 1px),
-      linear-gradient(90deg, var(--grid) 1px, transparent 1px);
-    background-size: 100% 100%, 100% 100%, 32px 32px, 32px 32px;
-    background-position: 0 0, 0 0, -1px -1px, -1px -1px;
   }
 }
 
 @layer components {
   .primary-button {
-    border: 1px solid oklch(0.78 0.16 75 / 60%);
-    background: oklch(0.78 0.16 75 / 12%);
-    color: var(--color-primary);
-    padding: 0.55rem 0.8rem;
-    font-size: 0.625rem;
-    line-height: 1rem;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.4rem;
+    min-height: 2.5rem;
+    border-radius: 12px;
+    border: 1px solid transparent;
+    background: var(--color-primary);
+    color: var(--color-primary-foreground);
+    padding: 0 1rem;
+    font-size: 0.875rem;
     font-weight: 700;
-    letter-spacing: 0.12em;
-    text-transform: uppercase;
-    transition: 160ms ease;
+    transition: background 160ms ease;
   }
 
   .primary-button:hover:not(:disabled) {
-    border-color: var(--color-primary);
-    background: oklch(0.78 0.16 75 / 18%);
+    background: #34ab58;
+  }
+
+  .primary-button:disabled,
+  .secondary-button:disabled,
+  .danger-button:disabled,
+  .icon-button:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
   }
 
   .secondary-button,
   .danger-button,
   .icon-button {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.4rem;
+    border-radius: 12px;
     border: 1px solid var(--color-border);
-    color: var(--color-muted-foreground);
-    font-size: 0.625rem;
-    line-height: 1rem;
-    font-weight: 700;
-    letter-spacing: 0.1em;
-    text-transform: uppercase;
-    transition: 160ms ease;
+    background: var(--input);
+    color: var(--color-foreground);
+    font-size: 0.8125rem;
+    font-weight: 600;
+    transition: border-color 160ms ease, background 160ms ease;
   }
 
   .secondary-button,
   .danger-button {
-    padding: 0.45rem 0.7rem;
+    min-height: 2.5rem;
+    padding: 0 0.9rem;
   }
 
   .icon-button {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    padding: 0.55rem;
+    min-width: 2.5rem;
+    min-height: 2.5rem;
+    padding: 0.5rem;
+    color: var(--color-muted-foreground);
   }
 
   .secondary-button:hover:not(:disabled),
   .icon-button:hover:not(:disabled) {
-    border-color: oklch(0.78 0.16 75 / 60%);
+    border-color: #2f352f;
+    background: var(--color-raised);
     color: var(--color-foreground);
   }
 
   .danger-button {
-    border-color: oklch(0.65 0.24 25 / 40%);
+    border-color: #3a2220;
+    background: #1c1110;
     color: var(--color-bear);
   }
 
   .danger-button:hover:not(:disabled) {
     border-color: var(--color-bear);
-    background: oklch(0.65 0.24 25 / 10%);
   }
 
   .terminal-input,
@@ -179,19 +191,27 @@
     width: 100%;
     min-height: 2.5rem;
     border: 1px solid var(--color-border);
-    border-radius: 2px;
-    background: var(--color-background);
+    border-radius: 12px;
+    background: var(--input);
     color: var(--color-foreground);
-    padding: 0.55rem 0.75rem;
-    font-family: var(--font-mono);
-    font-size: 0.75rem;
+    padding: 0.5rem 0.8rem;
+    font-family: var(--font-sans);
+    font-size: 0.875rem;
+    font-weight: 500;
     outline: none;
   }
 
   .terminal-input:focus,
   .terminal-select:focus {
-    border-color: var(--color-primary);
-    box-shadow: 0 0 0 1px oklch(0.78 0.16 75 / 25%);
+    border-color: var(--ring);
+  }
+
+  /* The one highlighted card per screen (the AI call). Flat gradient, no shadow. */
+  .accent-card {
+    border-radius: 20px;
+    border: 1px solid #2f7e47;
+    background: linear-gradient(160deg, #2e9a4e 0%, #1e6e37 55%, #164f28 100%);
+    color: #ffffff;
   }
 }
 
@@ -199,7 +219,7 @@ button:focus-visible,
 a:focus-visible,
 input:focus-visible,
 select:focus-visible {
-  outline: 2px solid var(--color-primary);
+  outline: 2px solid var(--ring);
   outline-offset: 2px;
 }
 
@@ -213,13 +233,19 @@ select:focus-visible {
 }
 
 @utility terminal-panel {
-  background-color: oklch(0.12 0 0 / 0.85);
+  background-color: var(--color-panel);
   border: 1px solid var(--color-border);
-  backdrop-filter: blur(8px);
+  border-radius: 20px;
 }
 
+@utility dot-grid {
+  background-image: radial-gradient(var(--color-grid) 1px, transparent 1px);
+  background-size: 16px 16px;
+}
+
+/* Kept as no-ops so older markup doesn't break: Dark Pro has no glow. */
 @utility glow-amber {
-  box-shadow: 0 0 24px -8px var(--glow);
+  box-shadow: none;
 }
 
 @utility ticker-scroll {
@@ -232,10 +258,5 @@ select:focus-visible {
 }
 
 @utility pulse-dot {
-  animation: pulse-dot 2s ease-in-out infinite;
-}
-
-@keyframes pulse-dot {
-  0%, 100% { opacity: 1; box-shadow: 0 0 0 0 var(--glow); }
-  50% { opacity: 0.7; box-shadow: 0 0 0 6px transparent; }
+  animation: none;
 }

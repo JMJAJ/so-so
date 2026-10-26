@@ -167,7 +167,7 @@ function SettingsForm() {
               </Field>
             );
           })}
-          <p className="text-[10px] text-muted-foreground">
+          <p className="text-xs text-muted-foreground">
             Keys are stored encrypted in the local database. Environment variables (.env) take
             precedence.
           </p>
@@ -272,7 +272,7 @@ function SettingsForm() {
           </Field>
         </div>
         <div className="mt-4">
-          <div className="mb-1.5 text-[9px] font-bold uppercase tracking-[0.15em] text-muted-foreground">
+          <div className="mb-1.5 text-[11px] font-bold text-muted-foreground">
             Asset classes the AI may recommend
           </div>
           <div className="flex flex-wrap gap-2">
@@ -282,7 +282,10 @@ function SettingsForm() {
                 <button
                   type="button"
                   key={cls}
-                  className={cn("secondary-button", on && "!border-primary !text-primary")}
+                  className={cn(
+                    "secondary-button",
+                    on && "!border-[#2f352f] !bg-accent !text-foreground",
+                  )}
                   onClick={() =>
                     set(
                       "enabled_classes",
@@ -309,11 +312,9 @@ function SettingsForm() {
 function Field({ label, hint, children }: { label: string; hint?: string; children: ReactNode }) {
   return (
     <label className="block min-w-0">
-      <span className="mb-1 block text-[9px] font-bold uppercase tracking-[0.15em] text-muted-foreground">
-        {label}
-      </span>
+      <span className="mb-1 block text-[11px] font-bold text-muted-foreground">{label}</span>
       {children}
-      {hint && <span className="mt-1 block text-[10px] text-muted-foreground">{hint}</span>}
+      {hint && <span className="mt-1 block text-xs text-muted-foreground">{hint}</span>}
     </label>
   );
 }
@@ -350,7 +351,7 @@ function JobsPanel() {
               <tr key={job.name}>
                 <Td>
                   <div className="font-bold">{humanize(job.name)}</div>
-                  <div className="max-w-[280px] whitespace-normal text-[10px] text-muted-foreground">
+                  <div className="max-w-[280px] whitespace-normal text-xs text-muted-foreground">
                     {job.description}
                   </div>
                 </Td>
@@ -374,7 +375,7 @@ function JobsPanel() {
                 <Td className="text-[11px]">{ago(job.last_finished)}</Td>
                 <Td className="text-[11px]">{job.next_run ? ago(job.next_run) : "—"}</Td>
                 <Td
-                  className="max-w-[320px] truncate text-[10px] text-muted-foreground"
+                  className="max-w-[320px] truncate text-xs text-muted-foreground"
                   title={job.last_error ?? job.last_summary ?? ""}
                 >
                   {job.running
@@ -450,7 +451,7 @@ function LogsPanel() {
   const logs = useQuery({ queryKey: ["logs"], queryFn: api.logs, refetchInterval: 15_000 });
   return (
     <Panel title="System log">
-      <div className="max-h-72 overflow-y-auto font-mono text-[10px] leading-relaxed">
+      <div className="max-h-72 overflow-y-auto font-mono text-xs leading-relaxed">
         {(logs.data ?? []).map((row) => (
           <div key={row.id} className="flex gap-2">
             <span className="shrink-0 text-muted-foreground">
@@ -458,11 +459,11 @@ function LogsPanel() {
             </span>
             <span
               className={cn(
-                "w-10 shrink-0 uppercase",
+                "w-10 shrink-0 ",
                 row.level === "error"
                   ? "text-bear"
                   : row.level === "warn"
-                    ? "text-primary"
+                    ? "text-foreground"
                     : "text-muted-foreground",
               )}
             >

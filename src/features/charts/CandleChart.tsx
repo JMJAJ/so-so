@@ -13,13 +13,13 @@ import { useEffect, useRef } from "react";
 import type { AssetDetail, Recommendation } from "@/lib/types";
 
 const COLORS = {
-  bg: "#0d0d0d",
-  text: "#8b8b82",
-  grid: "#1c1c1a",
-  up: "#27c977",
-  down: "#ef4758",
-  amber: "#f3b61f",
-  muted: "#6b6b66",
+  bg: "#0e100e",
+  text: "#7d847d",
+  grid: "#171a17",
+  up: "#34b357",
+  down: "#e5534b",
+  amber: "#e7e9e7",
+  muted: "#6f756f",
 };
 
 export default function CandleChart({
@@ -49,8 +49,8 @@ export default function CandleChart({
         fontSize: 10,
       },
       grid: { vertLines: { color: COLORS.grid }, horzLines: { color: COLORS.grid } },
-      rightPriceScale: { borderColor: "#292925" },
-      timeScale: { borderColor: "#292925" },
+      rightPriceScale: { borderColor: "#1f231f" },
+      timeScale: { borderColor: "#1f231f" },
       crosshair: { mode: 0 },
     });
     const candles = chart.addSeries(CandlestickSeries, {
@@ -75,7 +75,7 @@ export default function CandleChart({
       const volume = chart.addSeries(HistogramSeries, {
         priceScaleId: "vol",
         priceFormat: { type: "volume" },
-        color: "#2a2a27",
+        color: "#1d211d",
       });
       chart.priceScale("vol").applyOptions({ scaleMargins: { top: 0.85, bottom: 0 } });
       volume.setData(rows.map((bar) => ({ time: bar.t as Time, value: bar.v ?? 0 })));

@@ -16,7 +16,7 @@ export default function ChatView() {
   return (
     <div className="terminal-panel -my-1 flex h-[calc(100vh-7rem)] min-h-[480px]">
       <aside className="hidden w-60 shrink-0 flex-col border-r border-border lg:flex">
-        <div className="border-b border-border px-3 py-2.5 text-[10px] font-bold uppercase tracking-[0.2em] text-primary">
+        <div className="border-b border-border px-3 py-2.5 text-xs font-bold text-foreground">
           Conversations
         </div>
         <ul className="min-h-0 flex-1 overflow-y-auto py-1">
@@ -27,11 +27,11 @@ export default function ChatView() {
                 onClick={() => void load(conv.id)}
                 className={cn(
                   "w-full px-3 py-2 text-left text-[11px] hover:bg-accent/40",
-                  conv.id === conversationId && "bg-primary/10 text-primary",
+                  conv.id === conversationId && "bg-accent text-foreground",
                 )}
               >
                 <div className="truncate">{conv.title}</div>
-                <div className="text-[9px] text-muted-foreground">{ago(conv.updated_at)}</div>
+                <div className="text-[11px] text-muted-foreground">{ago(conv.updated_at)}</div>
               </button>
             </li>
           ))}
@@ -39,9 +39,7 @@ export default function ChatView() {
       </aside>
       <section className="flex min-w-0 flex-1 flex-col">
         <header className="flex items-center gap-2 border-b border-border px-3 py-2.5">
-          <span className="text-[10px] font-bold uppercase tracking-[0.2em] text-primary">
-            NEXUS chat
-          </span>
+          <span className="text-xs font-bold text-foreground">NEXUS chat</span>
           <ConversationControls />
         </header>
         <ChatPanel wide />

@@ -33,7 +33,10 @@ export default function NewsView() {
         {(["headlines", "events", "library"] as Tab[]).map((value) => (
           <button
             key={value}
-            className={cn("secondary-button", tab === value && "!border-primary !text-primary")}
+            className={cn(
+              "secondary-button",
+              tab === value && "!border-[#2f352f] !bg-accent !text-foreground",
+            )}
             onClick={() => setTab(value)}
           >
             {value === "library" ? "event library" : value === "events" ? "detected events" : value}
@@ -154,7 +157,7 @@ function DetectedEvents() {
                 <Td>
                   {event.instrument_id ? (
                     <button
-                      className="hover:text-primary"
+                      className="hover:text-bull"
                       onClick={() => openAsset(event.instrument_id as string)}
                     >
                       {event.instrument_id.split(":")[1].toUpperCase()}
@@ -164,7 +167,7 @@ function DetectedEvents() {
                   )}
                 </Td>
                 <Td className="max-w-[420px] truncate text-[11px]">{event.title}</Td>
-                <Td className="text-[10px] text-muted-foreground">{event.source}</Td>
+                <Td className="text-xs text-muted-foreground">{event.source}</Td>
               </tr>
             ))}
           </tbody>
@@ -183,7 +186,7 @@ function EventLibrary() {
     <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
       {(types.data ?? []).map((type) => (
         <Panel key={type.type} title={humanize(type.type)} subtitle={type.label}>
-          <div className="flex flex-wrap gap-2 text-[10px] text-muted-foreground">
+          <div className="flex flex-wrap gap-2 text-xs text-muted-foreground">
             <Badge>{type.scope}</Badge>
             <span>{type.n} occurrences</span>
             {type.first && (
@@ -192,7 +195,7 @@ function EventLibrary() {
               </span>
             )}
           </div>
-          <div className="mt-3 text-[9px] font-bold uppercase tracking-[0.15em] text-muted-foreground">
+          <div className="mt-3 text-[11px] font-bold text-muted-foreground">
             Most reliably affected (20d)
           </div>
           {type.most_affected && type.most_affected.length > 0 ? (
@@ -200,7 +203,7 @@ function EventLibrary() {
               {type.most_affected.map((asset) => (
                 <li key={asset.instrument_id} className="flex items-center justify-between text-xs">
                   <button
-                    className="hover:text-primary"
+                    className="hover:text-bull"
                     onClick={() => openAsset(asset.instrument_id)}
                   >
                     {asset.symbol}

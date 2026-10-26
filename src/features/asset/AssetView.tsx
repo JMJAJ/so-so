@@ -4,6 +4,7 @@ import { lazy, Suspense, useMemo, useState } from "react";
 
 import { FanChart } from "@/features/charts/svg";
 import { useChat } from "@/features/chat/chat-context";
+import { AiCallCard, EvidenceSteps } from "@/features/recs/AiCallCard";
 import { RecCard } from "@/features/recs/RecCard";
 import { HeadlinesPanel } from "@/features/today/TodayView";
 import {
@@ -49,7 +50,7 @@ export default function AssetView() {
   });
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-5">
       <InstrumentPicker onPick={openAsset} current={id} />
       {!id ? (
         <Empty title="Pick an instrument">
@@ -104,11 +105,11 @@ function InstrumentPicker({ onPick, current }: { onPick: (id: string) => void; c
         }}
       />
       {matches.length > 0 && (
-        <ul className="absolute z-20 mt-1 w-full border border-border bg-card shadow-xl">
+        <ul className="absolute z-20 mt-1 w-full overflow-hidden rounded-xl border border-border bg-popover">
           {matches.map((item) => (
             <li key={item.id}>
               <button
-                className="flex w-full items-center justify-between gap-2 px-3 py-2 text-left text-xs hover:bg-accent/40"
+                className="flex w-full items-center justify-between gap-2 px-3 py-2.5 text-left text-sm hover:bg-accent"
                 onClick={() => {
                   onPick(item.id);
                   setQuery("");
@@ -151,133 +152,169 @@ function AssetBody({
         ? last.c / prev.c - 1
         : null;
 
+  const openCall = data.recommendations.find((rec) => rec.status === "open");
+  const ranges: Array<{ key: string; label: string; active: boolean; pick: () => void }> = [
+    ...SPANS.map(([value, label]) => ({
+      key: value,
+      label,
+      active: span === value,
+      pick: () => setSpan(value),
+    })),
+    ...[1, 2, 5, 10].map((value) => ({
+      key: `${value}y`,
+      label: `${value}Y`,
+      active: !span && years === value,
+      pick: () => {
+        setSpan(null);
+        setYears(value);
+      },
+    })),
+  ];
+
   return (
     <>
-      <PageHeading
-        title={`${item.symbol} · ${item.name}`}
-        subtitle={
-          <span className="flex flex-wrap items-center gap-2">
+      <div className="flex flex-wrap items-start gap-3">
+        <div className="mr-auto min-w-0">
+          <div className="flex flex-wrap items-center gap-3">
+            <h1 className="text-[28px] font-semibold leading-tight">
+              {item.symbol} · {item.name}
+            </h1>
             <Badge>{item.asset_class}</Badge>
             {item.sector && <Badge>{item.sector}</Badge>}
-            <span className="font-display text-lg font-bold text-foreground">
-              {price(quotePrice)}
-            </span>
-            <span className={tone(change)}>{pct(change, 2)}</span>
-            <span>
-              {data.quote?.as_of
-                ? `quote ${ago(data.quote.as_of)}${data.quote.stale ? " (stale)" : ""}`
-                : ""}
-            </span>
-            {item.benchmark_id && (
-              <span>· measured vs {item.benchmark_id.split(":")[1].toUpperCase()}</span>
-            )}
-            {item.tradable && <MarketChip marketId={item.market} detail className="basis-full" />}
+          </div>
+          <div className="mt-1 text-sm text-muted-foreground">
+            {item.benchmark_id
+              ? `Measured against ${item.benchmark_id.split(":")[1].toUpperCase()}`
+              : "Its own benchmark"}
+          </div>
+        </div>
+        <button className="secondary-button" onClick={() => ask(`/why ${item.symbol}`, true)}>
+          <MessageSquare className="h-4 w-4" /> Ask AI why
+        </button>
+        {item.tradable && (
+          <button className="primary-button" onClick={() => ask(`/recommend ${item.symbol}`, true)}>
+            <Sparkles className="h-4 w-4" /> AI: recommend?
+          </button>
+        )}
+      </div>
+
+      <div className="flex flex-wrap items-end gap-x-6 gap-y-2">
+        <div className="flex items-baseline gap-3">
+          <span className="font-mono text-[40px] font-semibold leading-none">
+            {price(quotePrice)}
           </span>
-        }
-        actions={
-          <>
-            <button
-              className="secondary-button inline-flex items-center gap-1.5"
-              onClick={() => ask(`/why ${item.symbol}`, true)}
-            >
-              <MessageSquare className="h-3 w-3" /> Ask AI why
-            </button>
-            {item.tradable && (
-              <button
-                className="primary-button inline-flex items-center gap-1.5"
-                onClick={() => ask(`/recommend ${item.symbol}`, true)}
-              >
-                <Sparkles className="h-3 w-3" /> AI: recommend?
-              </button>
-            )}
-          </>
-        }
-      />
-      <Panel
-        title={span ? "Live price" : "Price & events"}
-        subtitle={
-          span
-            ? "Intraday candles in your time, pre- and after-market included, updating as new quotes arrive. Dashed lines: the open AI call's entry, stop and target."
-            : "Arrows: this asset's earnings beats/misses. Amber dots (toggle): macro and market events. AI calls are marked on the day they were made."
-        }
-        actions={[
-          ...SPANS.map(([value, label]) => (
-            <button
-              key={value}
-              className={cn(
-                "secondary-button !px-2 !py-1",
-                span === value && "!border-primary !text-primary",
-              )}
-              onClick={() => setSpan(value)}
-            >
-              {label}
-            </button>
-          )),
-          ...(span
-            ? []
-            : [
+          <span className={cn("font-mono text-[15px] font-semibold", tone(change))}>
+            {pct(change, 2)}
+          </span>
+        </div>
+        {last && (
+          <div className="flex gap-4 pb-1 font-mono text-[13px] text-muted-foreground">
+            <span>
+              O <span className="text-foreground">{price(last.o)}</span>
+            </span>
+            <span>
+              H <span className="text-foreground">{price(last.h)}</span>
+            </span>
+            <span>
+              L <span className="text-foreground">{price(last.l)}</span>
+            </span>
+            <span>
+              C <span className="text-foreground">{price(last.c)}</span>
+            </span>
+          </div>
+        )}
+        <span className="pb-1 text-xs text-muted-foreground">
+          {data.quote?.as_of
+            ? `Quote ${ago(data.quote.as_of)}${data.quote.stale ? " (stale)" : ""}`
+            : ""}
+        </span>
+        {item.tradable && <MarketChip marketId={item.market} detail className="pb-1" />}
+      </div>
+
+      <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_380px]">
+        <Panel
+          title={span ? "Live price" : "Price & events"}
+          subtitle={
+            span
+              ? "Intraday candles in your time, pre- and after-market included. Dashed lines: the open AI call's entry, stop and target."
+              : "Arrows: this asset's earnings beats and misses. Dots (toggle): macro and market events. AI calls are marked on the day they were made."
+          }
+          actions={
+            <>
+              {!span && (
                 <button
-                  key="macro"
                   className={cn(
-                    "secondary-button !px-2 !py-1",
-                    showMacro && "!border-primary !text-primary",
+                    "secondary-button !min-h-9",
+                    showMacro && "!border-[#1f3a27] !text-bull",
                   )}
                   onClick={() => setShowMacro((v) => !v)}
                 >
-                  macro events
-                </button>,
-              ]),
-          ...[1, 2, 5, 10].map((value) => (
-            <button
-              key={value}
-              className={cn(
-                "secondary-button !px-2 !py-1",
-                !span && years === value && "!border-primary !text-primary",
+                  Macro events
+                </button>
               )}
-              onClick={() => {
-                setSpan(null);
-                setYears(value);
-              }}
-            >
-              {value}y
-            </button>
-          )),
-        ]}
-        bodyClassName="p-2"
-      >
-        {span ? (
-          <Suspense fallback={<Loading />}>
-            <IntradayChart
-              instrumentId={item.id}
-              span={span}
-              recommendations={data.recommendations}
-            />
-          </Suspense>
-        ) : data.bars.length ? (
-          <Suspense fallback={<Loading />}>
-            <CandleChart
-              bars={data.bars}
-              events={data.events}
-              recommendations={data.recommendations}
-              showMacro={showMacro}
-            />
-          </Suspense>
-        ) : (
-          <Empty title="No price history" />
-        )}
-      </Panel>
+              <div
+                role="tablist"
+                aria-label="Chart range"
+                className="flex gap-0.5 rounded-xl border border-border bg-input p-1"
+              >
+                {ranges.map((range) => (
+                  <button
+                    key={range.key}
+                    role="tab"
+                    aria-selected={range.active}
+                    onClick={range.pick}
+                    className={cn(
+                      "min-h-8 rounded-lg px-2.5 text-xs font-semibold",
+                      range.active
+                        ? "bg-accent text-foreground"
+                        : "text-muted-foreground hover:text-foreground",
+                    )}
+                  >
+                    {range.label}
+                  </button>
+                ))}
+              </div>
+            </>
+          }
+          bodyClassName="p-3"
+        >
+          {span ? (
+            <Suspense fallback={<Loading />}>
+              <IntradayChart
+                instrumentId={item.id}
+                span={span}
+                recommendations={data.recommendations}
+              />
+            </Suspense>
+          ) : data.bars.length ? (
+            <Suspense fallback={<Loading />}>
+              <CandleChart
+                bars={data.bars}
+                events={data.events}
+                recommendations={data.recommendations}
+                showMacro={showMacro}
+              />
+            </Suspense>
+          ) : (
+            <Empty title="No price history" />
+          )}
+        </Panel>
+
+        <div className="flex min-w-0 flex-col gap-4">
+          {item.tradable && <AiCallCard rec={openCall} symbol={item.symbol} />}
+          {openCall && <EvidenceSteps rec={openCall} />}
+          <ForecastPanel data={data} />
+        </div>
+      </div>
 
       <div className="grid gap-4 xl:grid-cols-2">
-        <ForecastPanel data={data} />
         <AnalogPanel data={data} />
+        <CorrelationPanel data={data} />
       </div>
       <EventPanel data={data} />
-      <div className="grid gap-4 xl:grid-cols-2">
-        <CorrelationPanel data={data} />
-        <HeadlinesPanel items={data.news} title={`${item.symbol} headlines (21 days)`} />
-      </div>
+      <HeadlinesPanel items={data.news} title={`${item.symbol} headlines (21 days)`} />
       {data.recommendations.length > 0 && (
-        <Panel title={`AI calls on ${item.symbol}`}>
+        <Panel title={`All AI calls on ${item.symbol}`}>
           <div className="space-y-2">
             {data.recommendations.map((rec) => (
               <RecCard key={rec.id} rec={rec} compact />
@@ -322,11 +359,11 @@ function ForecastPanel({ data }: { data: AssetDetail }) {
           <div className="space-y-1.5">
             {SIGNALS.map((name) => (
               <div key={name} className="flex items-center gap-3 text-[11px]">
-                <span className="w-20 uppercase tracking-wider text-muted-foreground">{name}</span>
+                <span className="w-20 text-muted-foreground">{name}</span>
                 <ZBar value={f.signals[name]} />
                 <span className="w-12 text-right tabular-nums">{signed(f.signals[name])}</span>
                 {f.contributions[name] != null && (
-                  <span className="text-[10px] text-muted-foreground">
+                  <span className="text-xs text-muted-foreground">
                     contrib {pct(f.contributions[name], 2)}
                   </span>
                 )}
@@ -343,9 +380,7 @@ function ForecastPanel({ data }: { data: AssetDetail }) {
               ["from high", pct(t.dist_high_252)],
             ].map(([label, value]) => (
               <div key={label}>
-                <div className="text-[9px] uppercase tracking-[0.15em] text-muted-foreground">
-                  {label}
-                </div>
+                <div className="text-[11px] text-muted-foreground">{label}</div>
                 <div className="tabular-nums">{value}</div>
               </div>
             ))}
@@ -387,12 +422,13 @@ function AnalogPanel({ data }: { data: AssetDetail }) {
           </div>
           <FanChart fan={a.fan} horizon={a.horizon} />
           <details className="text-[11px]">
-            <summary className="cursor-pointer text-[10px] uppercase tracking-[0.15em] text-muted-foreground">
-              Analog dates
-            </summary>
+            <summary className="cursor-pointer text-xs text-muted-foreground">Analog dates</summary>
             <div className="mt-2 flex flex-wrap gap-1.5">
               {a.analogs.map((row) => (
-                <span key={row.date} className="border border-border px-1.5 py-0.5 tabular-nums">
+                <span
+                  key={row.date}
+                  className="rounded-lg border border-border px-1.5 py-0.5 tabular-nums"
+                >
                   {row.date} <span className={tone(row.fwd_return)}>{pct(row.fwd_return)}</span>
                 </span>
               ))}
@@ -419,7 +455,7 @@ function EventPanel({ data }: { data: AssetDetail }) {
     >
       <div className="grid gap-4 lg:grid-cols-2">
         <div>
-          <h3 className="mb-2 text-[10px] font-bold uppercase tracking-[0.15em] text-muted-foreground">
+          <h3 className="mb-2 text-xs font-bold text-muted-foreground">
             Live: events in the last 10 days
           </h3>
           {effects.active_events_last_10d.length === 0 ? (
@@ -433,13 +469,11 @@ function EventPanel({ data }: { data: AssetDetail }) {
                     onClick={() => setSelected(event.type)}
                   >
                     <EventBadge type={event.type} />
-                    <span className="text-[10px] text-muted-foreground">
-                      {shortDate(event.date)}
-                    </span>
+                    <span className="text-xs text-muted-foreground">{shortDate(event.date)}</span>
                   </button>
                   <div className="mt-0.5 text-xs">{event.title}</div>
                   {event.history ? (
-                    <div className="mt-1 flex flex-wrap items-center gap-2 text-[10px] text-muted-foreground">
+                    <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
                       <span>
                         next 20d avg{" "}
                         <span className={tone(event.history.mean)}>{pct(event.history.mean)}</span>{" "}
@@ -457,7 +491,7 @@ function EventPanel({ data }: { data: AssetDetail }) {
                       />
                     </div>
                   ) : (
-                    <div className="mt-1 text-[10px] text-muted-foreground">
+                    <div className="mt-1 text-xs text-muted-foreground">
                       No reliable history for this asset.
                     </div>
                   )}
@@ -467,7 +501,7 @@ function EventPanel({ data }: { data: AssetDetail }) {
           )}
         </div>
         <div>
-          <h3 className="mb-2 text-[10px] font-bold uppercase tracking-[0.15em] text-muted-foreground">
+          <h3 className="mb-2 text-xs font-bold text-muted-foreground">
             Most reliable event effects (20 sessions)
           </h3>
           {effects.most_reliable_event_effects.length === 0 ? (
@@ -516,7 +550,7 @@ function EventPanel({ data }: { data: AssetDetail }) {
       {selected && (
         <div className="mt-4 border-t border-border pt-4">
           <div className="mb-2 flex items-center justify-between">
-            <h3 className="text-[10px] font-bold uppercase tracking-[0.15em] text-primary">
+            <h3 className="text-xs font-bold text-foreground">
               Every past {humanize(selected)} → {data.instrument.symbol}{" "}
               {study.data?.measure ? `(${study.data.measure})` : ""}
             </h3>
@@ -529,9 +563,9 @@ function EventPanel({ data }: { data: AssetDetail }) {
           ) : study.data ? (
             <>
               {study.data.impact && (
-                <div className="mb-3 flex flex-wrap gap-2 text-[10px]">
+                <div className="mb-3 flex flex-wrap gap-2 text-xs">
                   {Object.entries(study.data.impact.horizons).map(([h, stats]) => (
-                    <span key={h} className="border border-border px-2 py-1">
+                    <span key={h} className="rounded-lg border border-border px-2 py-1">
                       {h === "0" ? "reaction day" : `${h}d`}:{" "}
                       <span className={tone(stats.mean)}>{pct(stats.mean)}</span> · edge{" "}
                       <span className={tone(stats.edge)}>{pct(stats.edge)}</span> · t{" "}
@@ -585,22 +619,19 @@ function CorrelationPanel({ data }: { data: AssetDetail }) {
       <div className="grid gap-4 sm:grid-cols-2">
         {(["positive", "negative"] as const).map((side) => (
           <div key={side}>
-            <h3 className="mb-1.5 text-[10px] font-bold uppercase tracking-[0.15em] text-muted-foreground">
+            <h3 className="mb-1.5 text-xs font-bold text-muted-foreground">
               {side === "positive" ? "Moves with" : "Moves against"}
             </h3>
             <ul className="space-y-1">
               {peers[side].slice(0, 6).map((peer) => (
                 <li key={peer.instrument_id} className="flex items-center justify-between text-xs">
-                  <button
-                    className="hover:text-primary"
-                    onClick={() => openAsset(peer.instrument_id)}
-                  >
+                  <button className="hover:text-bull" onClick={() => openAsset(peer.instrument_id)}>
                     {peer.symbol}
                   </button>
                   <span className="tabular-nums text-muted-foreground">
                     {peer.corr_1y.toFixed(2)}
                     {peer.corr_60d != null && (
-                      <span className="ml-2 text-[10px]">60d {peer.corr_60d.toFixed(2)}</span>
+                      <span className="ml-2 text-xs">60d {peer.corr_60d.toFixed(2)}</span>
                     )}
                   </span>
                 </li>
@@ -609,9 +640,7 @@ function CorrelationPanel({ data }: { data: AssetDetail }) {
           </div>
         ))}
       </div>
-      <h3 className="mb-1.5 mt-4 text-[10px] font-bold uppercase tracking-[0.15em] text-muted-foreground">
-        Lead-lag drivers
-      </h3>
+      <h3 className="mb-1.5 mt-4 text-xs font-bold text-muted-foreground">Lead-lag drivers</h3>
       {lead_lag.length === 0 ? (
         <div className="text-xs text-muted-foreground">
           No driver passes the significance threshold.

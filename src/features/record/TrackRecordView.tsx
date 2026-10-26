@@ -101,7 +101,7 @@ export default function TrackRecordView() {
               key={key}
               className={cn(
                 "secondary-button !px-2 !py-1",
-                group === key && "!border-primary !text-primary",
+                group === key && "!border-[#2f352f] !bg-accent !text-foreground",
               )}
               onClick={() => setGroup(key)}
             >
@@ -182,11 +182,11 @@ function SkillsPanel({ record }: { record: TrackRecord }) {
                   <tr key={skill.name}>
                     <Td>
                       <div className="font-bold">{skill.name}</div>
-                      <div className="max-w-[340px] whitespace-normal text-[10px] text-muted-foreground">
+                      <div className="max-w-[340px] whitespace-normal text-xs text-muted-foreground">
                         {skill.description}
                       </div>
                     </Td>
-                    <Td className="min-w-[180px] max-w-[240px] whitespace-normal text-[10px] text-muted-foreground">
+                    <Td className="min-w-[180px] max-w-[240px] whitespace-normal text-xs text-muted-foreground">
                       {skill.when}
                     </Td>
                     <Td right>{n}</Td>
@@ -208,10 +208,10 @@ function SkillsPanel({ record }: { record: TrackRecord }) {
             </tbody>
           </TableWrap>
           {shown && (
-            <div className="min-w-0 overflow-hidden break-words border border-border p-3 text-[12px]">
+            <div className="rounded-lg min-w-0 overflow-hidden break-words border border-border p-3 text-[12px]">
               {body.data ? (
                 <>
-                  <div className="mb-2 text-[10px] uppercase tracking-wider text-primary">
+                  <div className="mb-2 text-xs text-foreground">
                     {body.data.name} · version {body.data.version}
                   </div>
                   <Markdown text={body.data.body} />
@@ -345,9 +345,9 @@ function ModelTable({ models }: { models: ModelSummary[] }) {
       {models.map((model) => {
         const wf = model.walk_forward;
         return (
-          <div key={model.asset_class} className="border border-border p-3">
+          <div key={model.asset_class} className="rounded-lg border border-border p-3">
             <div className="flex flex-wrap items-center gap-2">
-              <span className="font-display text-sm font-bold uppercase">{model.asset_class}</span>
+              <span className="font-display text-sm font-bold ">{model.asset_class}</span>
               <Badge tone={model.has_edge ? "bull" : "neutral"}>
                 {model.has_edge ? "validated edge" : "no reliable edge"}
               </Badge>
@@ -361,9 +361,12 @@ function ModelTable({ models }: { models: ModelSummary[] }) {
               )}
             </div>
             {wf && (
-              <div className="mt-2 flex flex-wrap gap-1.5 text-[10px]">
+              <div className="mt-2 flex flex-wrap gap-1.5 text-xs">
                 {Object.entries(wf.ic_by_year).map(([year, ic]) => (
-                  <span key={year} className="border border-border px-1.5 py-0.5 tabular-nums">
+                  <span
+                    key={year}
+                    className="rounded-lg border border-border px-1.5 py-0.5 tabular-nums"
+                  >
                     {year} <span className={tone(ic)}>{ic.toFixed(2)}</span>
                   </span>
                 ))}
@@ -385,7 +388,7 @@ function ModelTable({ models }: { models: ModelSummary[] }) {
               </div>
             )}
             {model.reason && (
-              <div className="mt-1 text-[10px] text-muted-foreground">{model.reason}</div>
+              <div className="mt-1 text-xs text-muted-foreground">{model.reason}</div>
             )}
           </div>
         );

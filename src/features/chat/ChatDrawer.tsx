@@ -62,9 +62,7 @@ export default function ChatDrawer() {
   return (
     <aside className="fixed inset-y-0 right-0 z-40 flex w-full flex-col border-l border-border bg-card shadow-2xl sm:w-[460px]">
       <header className="flex items-center gap-2 border-b border-border px-3 py-2.5">
-        <span className="text-[10px] font-bold uppercase tracking-[0.2em] text-primary">
-          NEXUS chat
-        </span>
+        <span className="text-xs font-bold text-foreground">NEXUS chat</span>
         <ConversationControls />
         <button
           className="icon-button !p-1.5"

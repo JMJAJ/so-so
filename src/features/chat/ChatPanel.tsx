@@ -40,7 +40,7 @@ export function ChatPanel({ wide = false }: { wide?: boolean }) {
             message.role === "user" ? (
               <div
                 key={index}
-                className="ml-8 border border-primary/30 bg-primary/5 px-3 py-2 text-xs"
+                className="ml-8 border rounded-xl border-border bg-raised px-3 py-2 text-xs"
               >
                 {message.text}
               </div>
@@ -52,8 +52,8 @@ export function ChatPanel({ wide = false }: { wide?: boolean }) {
                 ))}
                 {message.text ? <Markdown text={message.text} /> : null}
                 {message.pending && (
-                  <div className="flex items-center gap-2 text-[10px] uppercase tracking-[0.2em] text-muted-foreground">
-                    <Loader2 className="h-3 w-3 animate-spin text-primary" /> researching
+                  <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                    <Loader2 className="h-3 w-3 animate-spin text-bull" /> researching
                   </div>
                 )}
               </div>
@@ -89,7 +89,7 @@ export function ChatPanel({ wide = false }: { wide?: boolean }) {
             </button>
           ) : (
             <button
-              className="icon-button !border-primary/60 !text-primary"
+              className="icon-button !border-[#1f3a27] !text-bull"
               aria-label="Send"
               disabled={!input.trim()}
             >
@@ -105,7 +105,7 @@ export function ChatPanel({ wide = false }: { wide?: boolean }) {
                   type="button"
                   key={command}
                   title={help}
-                  className="border border-border px-1.5 py-0.5 text-[10px] hover:border-primary"
+                  className="rounded-lg border border-border px-1.5 py-0.5 text-xs hover:border-[#2f352f]"
                   onClick={() => setInput(command.split(" ")[0] + " ")}
                 >
                   {command.split(" ")[0]}
@@ -131,10 +131,10 @@ function Welcome({ wide, onPick }: { wide: boolean; onPick: (command: string) =>
         {COMMANDS.map(([command, help]) => (
           <button
             key={command}
-            className="flex items-center justify-between gap-3 border border-border px-2.5 py-1.5 text-left text-[11px] hover:border-primary"
+            className="rounded-lg flex items-center justify-between gap-3 border border-border px-2.5 py-1.5 text-left text-[11px] hover:border-[#2f352f]"
             onClick={() => onPick(command.includes(" ") ? command : command + " ")}
           >
-            <span className="shrink-0 font-bold text-primary">{command}</span>
+            <span className="shrink-0 font-bold text-foreground">{command}</span>
             <span className="truncate text-muted-foreground">{help}</span>
           </button>
         ))}
@@ -146,7 +146,7 @@ function Welcome({ wide, onPick }: { wide: boolean; onPick: (command: string) =>
 function ToolTrace({ tools }: { tools: NonNullable<ChatMessage["tools"]> }) {
   const [open, setOpen] = useState(false);
   return (
-    <div className="border border-border bg-background/50 text-[10px]">
+    <div className="border border-border bg-background/50 text-xs">
       <button
         className="flex w-full items-center gap-1.5 px-2 py-1 text-left text-muted-foreground"
         onClick={() => setOpen((v) => !v)}
@@ -162,7 +162,7 @@ function ToolTrace({ tools }: { tools: NonNullable<ChatMessage["tools"]> }) {
         <ul className="space-y-1 border-t border-border px-2 py-1.5">
           {tools.map((tool, i) => (
             <li key={i} className={cn("break-all", tool.is_error && "text-bear")}>
-              <span className="font-bold text-primary">{tool.name}</span>{" "}
+              <span className="font-bold text-foreground">{tool.name}</span>{" "}
               {JSON.stringify(tool.input)}
               {tool.preview && (
                 <div className="mt-0.5 line-clamp-2 text-muted-foreground">{tool.preview}</div>

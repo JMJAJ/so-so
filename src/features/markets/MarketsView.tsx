@@ -88,7 +88,7 @@ export default function MarketsView() {
             key={label}
             className={cn(
               "secondary-button !px-2 !py-1",
-              offset === value && "!border-primary !text-primary",
+              offset === value && "!border-[#2f352f] !bg-accent !text-foreground",
             )}
             onClick={() => setOffset(value as number)}
           >
@@ -123,7 +123,7 @@ export default function MarketsView() {
                       {m.name}
                       {!m.holidays_known && <span className="text-muted-foreground">*</span>}
                     </div>
-                    <div className="text-[10px] text-muted-foreground">
+                    <div className="text-xs text-muted-foreground">
                       {TRADES_HERE[m.id] ? `NEXUS: ${TRADES_HERE[m.id]}` : m.city}
                     </div>
                   </Td>
@@ -200,7 +200,7 @@ function Timeline({
   return (
     <div className="overflow-x-auto">
       <div className="min-w-[720px]">
-        <div className="relative ml-40 h-5 text-[9px] text-muted-foreground">
+        <div className="relative ml-40 h-5 text-[11px] text-muted-foreground">
           {hours
             .filter((_, i) => i % 3 === 0 && i < hours.length - 1)
             .map((t) => (
@@ -219,14 +219,12 @@ function Timeline({
               .filter(Boolean) as Array<[number, number]>;
             return (
               <div key={m.id} className="flex h-7 items-center border-t border-border/50">
-                <div className="w-40 shrink-0 truncate pr-2 text-[10px] font-bold uppercase tracking-[0.08em]">
-                  {m.name}
-                </div>
+                <div className="w-40 shrink-0 truncate pr-2 text-xs font-bold ">{m.name}</div>
                 <div className="relative h-4 flex-1 bg-accent/10">
                   {extended.map(([a, b]) => (
                     <div
                       key={`x${a}`}
-                      className="absolute inset-y-1 bg-primary/15"
+                      className="absolute inset-y-1 bg-bull/15"
                       style={{ left: pos(a), width: size(a, b) }}
                     />
                   ))}
@@ -246,9 +244,7 @@ function Timeline({
             );
           })}
           <div className="flex h-7 items-center border-t border-border">
-            <div className="w-40 shrink-0 pr-2 text-[10px] uppercase tracking-[0.08em] text-muted-foreground">
-              Exchanges open
-            </div>
+            <div className="w-40 shrink-0 pr-2 text-xs text-muted-foreground">Exchanges open</div>
             <div className="relative flex h-4 flex-1">
               {slots.map((count, i) => (
                 <div
@@ -263,7 +259,7 @@ function Timeline({
           {showNow && (
             <div className="pointer-events-none absolute inset-y-0 left-40 right-0">
               <div className="absolute inset-y-0 w-px bg-primary" style={{ left: pos(now) }}>
-                <span className="absolute -top-1 left-1 bg-background px-1 text-[9px] font-bold text-primary">
+                <span className="absolute -top-1 left-1 bg-background px-1 text-[11px] font-bold text-foreground">
                   now
                 </span>
               </div>
@@ -308,7 +304,7 @@ function Overlaps({
         {rows.map(({ market, shared }) => (
           <div
             key={market.id}
-            className="flex items-baseline justify-between gap-2 border border-border px-3 py-2 text-[11px]"
+            className="rounded-lg flex items-baseline justify-between gap-2 border border-border px-3 py-2 text-[11px]"
           >
             <span className="font-bold">{market.name}</span>
             <span className={shared.length ? "text-foreground" : "text-muted-foreground"}>

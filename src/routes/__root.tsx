@@ -17,14 +17,12 @@ function NotFoundComponent() {
   return (
     <div className="flex min-h-screen items-center justify-center bg-background px-4">
       <div className="terminal-panel max-w-md p-8 text-center">
-        <div className="font-mono text-xs uppercase tracking-widest text-primary">
-          ERR_404 // ROUTE_NOT_FOUND
-        </div>
+        <div className="font-mono text-xs text-primary">ERR_404 // ROUTE_NOT_FOUND</div>
         <h1 className="mt-4 font-display text-6xl font-bold text-foreground">404</h1>
         <p className="mt-3 text-sm text-muted-foreground">This terminal path does not exist.</p>
         <Link
           to="/"
-          className="mt-6 inline-flex items-center justify-center rounded-sm bg-primary px-4 py-2 text-xs font-bold uppercase tracking-widest text-primary-foreground"
+          className="mt-6 inline-flex items-center justify-center rounded-sm bg-primary px-4 py-2 text-xs font-bold text-primary-foreground"
         >
           Return to terminal
         </Link>
@@ -40,9 +38,7 @@ function ErrorComponent({ error, reset }: ErrorComponentProps) {
   return (
     <div className="flex min-h-screen items-center justify-center bg-background px-4">
       <div className="terminal-panel max-w-md p-8 text-center">
-        <div className="font-mono text-xs uppercase tracking-widest text-destructive">
-          SYS_ERROR // RUNTIME
-        </div>
+        <div className="font-mono text-xs text-destructive">SYS_ERROR // RUNTIME</div>
         <h1 className="mt-4 font-display text-2xl font-bold">Terminal disconnected</h1>
         <p className="mt-2 text-sm text-muted-foreground">An exception interrupted the feed.</p>
         <div className="mt-6 flex justify-center gap-2">
@@ -51,14 +47,11 @@ function ErrorComponent({ error, reset }: ErrorComponentProps) {
               router.invalidate();
               reset();
             }}
-            className="rounded-sm bg-primary px-4 py-2 text-xs font-bold uppercase tracking-widest text-primary-foreground"
+            className="rounded-sm bg-primary px-4 py-2 text-xs font-bold text-primary-foreground"
           >
             Reconnect
           </button>
-          <a
-            href="/"
-            className="rounded-sm border border-border px-4 py-2 text-xs font-bold uppercase tracking-widest"
-          >
+          <a href="/" className="rounded-sm border border-border px-4 py-2 text-xs font-bold ">
             Home
           </a>
         </div>

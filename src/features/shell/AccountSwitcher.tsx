@@ -13,7 +13,7 @@ export function AccountSwitcher() {
   const active = currentAccount();
   return (
     <label
-      className="flex shrink-0 items-center gap-1.5 text-[10px] uppercase tracking-[0.12em] text-muted-foreground"
+      className="flex shrink-0 items-center gap-1.5 text-xs text-muted-foreground"
       title="Paper account in use: portfolio, trades and chat orders go here"
     >
       <Wallet className="h-3.5 w-3.5" />

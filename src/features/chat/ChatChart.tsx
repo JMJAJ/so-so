@@ -14,10 +14,8 @@ const LEVEL_COLORS = { amber: chartColors.AMBER, bull: chartColors.BULL, bear: c
 
 export function ChatChart({ chart }: { chart: ChatChartData }) {
   return (
-    <figure className="border border-border bg-background/60 p-3">
-      <figcaption className="mb-2 text-[10px] font-bold uppercase tracking-[0.15em] text-primary">
-        {chart.title}
-      </figcaption>
+    <figure className="rounded-lg border border-border bg-background/60 p-3">
+      <figcaption className="mb-2 text-xs font-bold text-foreground">{chart.title}</figcaption>
       {chart.kind === "line" && (
         <LineChart
           height={190}
@@ -41,10 +39,10 @@ export function ChatChart({ chart }: { chart: ChatChartData }) {
         />
       )}
       {"note" in chart && chart.note && (
-        <p className="mt-2 text-[10px] text-muted-foreground">{chart.note}</p>
+        <p className="mt-2 text-xs text-muted-foreground">{chart.note}</p>
       )}
       {chart.kind === "line" && chart.markers.length > 0 && (
-        <p className="mt-1 text-[10px] text-muted-foreground">
+        <p className="mt-1 text-xs text-muted-foreground">
           Amber ticks: events (hover for details).
         </p>
       )}

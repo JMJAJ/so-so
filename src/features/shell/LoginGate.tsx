@@ -16,7 +16,7 @@ export function LoginGate({ children }: { children: ReactNode }) {
   if (status.data === undefined && status.error === null) {
     return (
       <div className="flex min-h-screen items-center justify-center">
-        <Loader2 className="h-4 w-4 animate-spin text-primary" />
+        <Loader2 className="h-4 w-4 animate-spin text-bull" />
       </div>
     );
   }
@@ -47,13 +47,11 @@ function LoginScreen() {
     <div className="flex min-h-screen items-center justify-center px-4">
       <form onSubmit={submit} className="terminal-panel w-full max-w-sm space-y-4 p-6">
         <div className="flex items-center gap-2">
-          <BarChart3 className="h-4 w-4 text-primary" />
-          <span className="font-display text-sm font-bold tracking-[0.25em]">NEXUS</span>
+          <BarChart3 className="h-4 w-4 text-foreground" />
+          <span className="font-display text-sm font-bold ">NEXUS</span>
         </div>
         <label className="block space-y-1.5">
-          <span className="text-[10px] font-bold uppercase tracking-[0.15em] text-muted-foreground">
-            Password
-          </span>
+          <span className="text-xs font-bold text-muted-foreground">Password</span>
           <input
             className="terminal-input w-full"
             type="password"

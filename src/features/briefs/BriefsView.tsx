@@ -143,12 +143,12 @@ function BriefRow({
         onClick={onClick}
         className={cn(
           "flex w-full items-center justify-between gap-2 border-b border-border px-3 py-2.5 text-left text-[11px] hover:bg-accent/30",
-          active && "bg-primary/10",
+          active && "bg-accent",
         )}
       >
         <span>
-          <span className={cn("block font-bold", active && "text-primary")}>{day}</span>
-          <span className="text-[10px] text-muted-foreground">
+          <span className={cn("block font-bold", active && "text-foreground")}>{day}</span>
+          <span className="text-xs text-muted-foreground">
             {time} · {brief.recommendations.length} call
             {brief.recommendations.length === 1 ? "" : "s"}
           </span>

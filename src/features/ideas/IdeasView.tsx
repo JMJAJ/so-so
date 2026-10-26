@@ -83,7 +83,7 @@ export default function IdeasView() {
             onClick={() => setAssetClass(value)}
             className={cn(
               "secondary-button",
-              assetClass === value && "!border-primary !text-primary",
+              assetClass === value && "!border-[#2f352f] !bg-accent !text-foreground",
             )}
           >
             {value}
@@ -115,7 +115,7 @@ export default function IdeasView() {
           onChange={(event) => setQuery(event.target.value)}
         />
       </div>
-      <p className="text-[10px] text-muted-foreground">
+      <p className="text-xs text-muted-foreground">
         ● = the quant model has a validated walk-forward edge for that class; ○ = it doesn't
         (forecast = base rate).
       </p>
@@ -171,7 +171,7 @@ export default function IdeasView() {
                 >
                   <Td>
                     <div className="font-bold">{row.symbol}</div>
-                    <div className="max-w-[140px] truncate text-[10px] text-muted-foreground">
+                    <div className="max-w-[140px] truncate text-xs text-muted-foreground">
                       {row.name}
                     </div>
                   </Td>
@@ -193,7 +193,7 @@ export default function IdeasView() {
                       ? `${row.news_flow > 0 ? "+" : ""}${row.news_flow} (${row.news_count})`
                       : "—"}
                   </Td>
-                  <Td className="max-w-[220px] truncate text-[10px] text-muted-foreground">
+                  <Td className="max-w-[220px] truncate text-xs text-muted-foreground">
                     {driverText(row)}
                   </Td>
                 </tr>
@@ -219,10 +219,7 @@ function SortTh({
     <Th>
       <button
         onClick={onClick}
-        className={cn(
-          "uppercase tracking-[0.15em]",
-          active ? "text-primary" : "hover:text-foreground",
-        )}
+        className={cn(" ", active ? "text-foreground" : "hover:text-foreground")}
       >
         {label}
         {active ? " ↓" : ""}

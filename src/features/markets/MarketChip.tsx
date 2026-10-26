@@ -53,11 +53,11 @@ export function MarketChip({
       onClick={() => go("markets")}
       title="Global market hours"
       className={cn(
-        "inline-flex flex-wrap items-center gap-x-2 gap-y-1 text-left text-[10px] text-muted-foreground hover:text-foreground",
+        "inline-flex flex-wrap items-center gap-x-2 gap-y-1 text-left text-xs text-muted-foreground hover:text-foreground",
         className,
       )}
     >
-      <span className="font-bold uppercase tracking-[0.12em] text-foreground">{market.name}</span>
+      <span className="font-bold text-foreground">{market.name}</span>
       <MarketPhase market={market} now={now} />
       <span>{changeText(market, now)}</span>
       {detail && !roundTheClock && day.length > 0 && (

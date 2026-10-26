@@ -41,7 +41,7 @@ export function RecCard({ rec, compact = false }: { rec: Recommendation; compact
       <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 px-3 py-2.5">
         <button
           onClick={() => openAsset(rec.instrument_id)}
-          className="font-display text-base font-bold hover:text-primary"
+          className="font-display text-base font-bold hover:text-bull"
         >
           {rec.symbol}
         </button>
@@ -53,7 +53,7 @@ export function RecCard({ rec, compact = false }: { rec: Recommendation; compact
           <span className={cn("font-display text-lg font-bold tabular-nums", tone(ret))}>
             {pct(ret)}
           </span>
-          <span className="ml-2 text-[10px] text-muted-foreground">
+          <span className="ml-2 text-xs text-muted-foreground">
             {rec.status === "closed" ? "realized" : "marked"}
           </span>
         </span>
@@ -73,20 +73,18 @@ export function RecCard({ rec, compact = false }: { rec: Recommendation; compact
         {rec.evidence.slice(0, open ? 20 : 3).map((item, index) => (
           <span
             key={index}
-            className="inline-flex max-w-full items-start gap-1.5 border border-border px-1.5 py-1 text-[10px] leading-snug"
+            className="rounded-lg inline-flex max-w-full items-start gap-1.5 border border-border px-1.5 py-1 text-xs leading-snug"
           >
-            <span className="shrink-0 font-bold uppercase tracking-wider text-primary">
-              {humanize(item.type)}
-            </span>
+            <span className="shrink-0 font-bold text-foreground">{humanize(item.type)}</span>
             <span className="text-muted-foreground">{item.summary}</span>
           </span>
         ))}
       </div>
       {(rec.skills?.length || rec.lesson || rec.exit_reason === "ai_review") && (
-        <div className="space-y-1 border-t border-border/60 px-3 py-2 text-[10px] text-muted-foreground">
+        <div className="space-y-1 border-t border-border/60 px-3 py-2 text-xs text-muted-foreground">
           {rec.skills && rec.skills.length > 0 && (
             <div className="flex flex-wrap items-center gap-1">
-              <span className="font-bold uppercase tracking-wider text-foreground">Skills:</span>
+              <span className="font-bold text-foreground">Skills:</span>
               {rec.skills.map((tag) => (
                 <Badge key={tag}>{tag.replace("@", " v")}</Badge>
               ))}
@@ -94,9 +92,7 @@ export function RecCard({ rec, compact = false }: { rec: Recommendation; compact
           )}
           {rec.exit_reason === "ai_review" && (
             <div>
-              <span className="font-bold uppercase tracking-wider text-foreground">
-                Closed early by AI
-              </span>
+              <span className="font-bold text-foreground">Closed early by AI</span>
               {rec.hold_return != null ? (
                 <>
                   {" "}
@@ -116,7 +112,7 @@ export function RecCard({ rec, compact = false }: { rec: Recommendation; compact
           )}
           {rec.lesson && (
             <div>
-              <span className="font-bold uppercase tracking-wider text-foreground">Lesson: </span>
+              <span className="font-bold text-foreground">Lesson: </span>
               {rec.lesson}
             </div>
           )}
@@ -127,15 +123,13 @@ export function RecCard({ rec, compact = false }: { rec: Recommendation; compact
           <Markdown text={rec.thesis} />
           {rec.catalysts.length > 0 && (
             <div className="text-[11px] text-muted-foreground">
-              <span className="font-bold uppercase tracking-wider text-foreground">
-                Catalysts:{" "}
-              </span>
+              <span className="font-bold text-foreground">Catalysts: </span>
               {rec.catalysts.join(" · ")}
             </div>
           )}
           {rec.invalidation && (
             <div className="text-[11px] text-muted-foreground">
-              <span className="font-bold uppercase tracking-wider text-foreground">Wrong if: </span>
+              <span className="font-bold text-foreground">Wrong if: </span>
               {rec.invalidation}
             </div>
           )}
@@ -144,7 +138,7 @@ export function RecCard({ rec, compact = false }: { rec: Recommendation; compact
           )}
         </div>
       )}
-      <div className="flex flex-wrap items-center gap-2 border-t border-border/60 px-3 py-1.5 text-[10px] text-muted-foreground">
+      <div className="flex flex-wrap items-center gap-2 border-t border-border/60 px-3 py-1.5 text-xs text-muted-foreground">
         <span>
           {rec.source} · {ago(rec.created_at)}
           {rec.traded ? " · paper position" : ""}
@@ -205,7 +199,7 @@ export function RecCard({ rec, compact = false }: { rec: Recommendation; compact
 function Field({ label, value, className }: { label: string; value: string; className?: string }) {
   return (
     <div>
-      <div className="text-[9px] uppercase tracking-[0.15em] text-muted-foreground">{label}</div>
+      <div className="text-[11px] text-muted-foreground">{label}</div>
       <div className={cn("tabular-nums", className)}>{value}</div>
     </div>
   );

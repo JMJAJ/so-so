@@ -135,7 +135,7 @@ export default function PortfolioView() {
                 <tr key={position.id}>
                   <Td>
                     <button
-                      className="font-bold hover:text-primary"
+                      className="font-bold hover:text-bull"
                       onClick={() => openAsset(position.instrument_id)}
                     >
                       {position.symbol}
@@ -155,7 +155,7 @@ export default function PortfolioView() {
                   <Td right>{price(position.current_price)}</Td>
                   <Td right className={tone(position.pnl)}>
                     {money(position.pnl, true)}{" "}
-                    <span className="text-[10px]">({num(position.pnl_pct, 1)}%)</span>
+                    <span className="text-xs">({num(position.pnl_pct, 1)}%)</span>
                   </Td>
                   <Td right className="text-bear">
                     {price(position.stop)}
@@ -163,7 +163,7 @@ export default function PortfolioView() {
                   <Td right className="text-bull">
                     {price(position.target)}
                   </Td>
-                  <Td className="text-[10px] text-muted-foreground">{ago(position.expires_at)}</Td>
+                  <Td className="text-xs text-muted-foreground">{ago(position.expires_at)}</Td>
                   <Td>
                     <button
                       className="danger-button !py-1"
@@ -204,7 +204,7 @@ export default function PortfolioView() {
                   <Td>{shortDate(trade.closed_at)}</Td>
                   <Td>
                     <button
-                      className="font-bold hover:text-primary"
+                      className="font-bold hover:text-bull"
                       onClick={() => openAsset(trade.instrument_id)}
                     >
                       {trade.symbol}

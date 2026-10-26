@@ -16,12 +16,13 @@ import { api } from "@/lib/api";
 import type { IntradaySpan, Recommendation } from "@/lib/types";
 
 const COLORS = {
-  bg: "#0d0d0d",
-  text: "#8b8b82",
-  grid: "#1c1c1a",
-  up: "#27c977",
-  down: "#ef4758",
-  amber: "#f3b61f",
+  bg: "#0e100e",
+  text: "#7d847d",
+  grid: "#171a17",
+  up: "#34b357",
+  down: "#e5534b",
+  amber: "#e7e9e7",
+  muted: "#6f756f",
 };
 
 /** lightweight-charts draws UTC; shift so the axis reads in the viewer's local time. */
@@ -70,8 +71,8 @@ export default function IntradayChart({
         fontSize: 10,
       },
       grid: { vertLines: { color: COLORS.grid }, horzLines: { color: COLORS.grid } },
-      rightPriceScale: { borderColor: "#292925" },
-      timeScale: { borderColor: "#292925", timeVisible: true, secondsVisible: false },
+      rightPriceScale: { borderColor: "#1f231f" },
+      timeScale: { borderColor: "#1f231f", timeVisible: true, secondsVisible: false },
       crosshair: { mode: 0 },
     });
     candles.current = instance.addSeries(CandlestickSeries, {
@@ -85,7 +86,7 @@ export default function IntradayChart({
     volume.current = instance.addSeries(HistogramSeries, {
       priceScaleId: "vol",
       priceFormat: { type: "volume" },
-      color: "#2a2a27",
+      color: "#1d211d",
     });
     instance.priceScale("vol").applyOptions({ scaleMargins: { top: 0.85, bottom: 0 } });
     if (entry != null && stop != null && target != null) {
@@ -126,7 +127,7 @@ export default function IntradayChart({
       rows.map((bar) => ({
         time: local(bar.t),
         value: bar.v ?? 0,
-        color: (bar.c ?? 0) >= (bar.o ?? 0) ? "#1d3a2b" : "#3d1f23",
+        color: (bar.c ?? 0) >= (bar.o ?? 0) ? "#17331f" : "#3a1c1a",
       })),
     );
     if (!fitted.current) {

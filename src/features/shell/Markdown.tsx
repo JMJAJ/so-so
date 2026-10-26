@@ -16,7 +16,7 @@ export function Markdown({ text }: { text: string }) {
       blocks.push(
         <pre
           key={blocks.length}
-          className="overflow-x-auto border border-border bg-background p-2 text-[11px]"
+          className="rounded-lg overflow-x-auto border border-border bg-background p-2 text-[11px]"
         >
           {body.join("\n")}
         </pre>,
@@ -121,7 +121,7 @@ function inline(text: string): ReactNode {
   return parts.map((part, index) => {
     if (part.startsWith("`") && part.endsWith("`") && part.length > 1)
       return (
-        <code key={index} className="bg-muted px-1 text-[0.95em] text-primary">
+        <code key={index} className="bg-muted px-1 text-[0.95em] text-bull">
           {part.slice(1, -1)}
         </code>
       );

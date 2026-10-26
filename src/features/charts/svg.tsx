@@ -99,11 +99,11 @@ export function FanChart({
         </text>
       </svg>
       {active && (
-        <div className="mt-1 flex flex-wrap gap-x-4 text-[10px] text-muted-foreground">
+        <div className="mt-1 flex flex-wrap gap-x-4 text-xs text-muted-foreground">
           <span>day {active.day}</span>
           <span>p10 {pct(active.p10)}</span>
           <span>p25 {pct(active.p25)}</span>
-          <span className="text-primary">median {pct(active.p50)}</span>
+          <span className="text-bull">median {pct(active.p50)}</span>
           <span>p75 {pct(active.p75)}</span>
           <span>p90 {pct(active.p90)}</span>
         </div>
@@ -147,9 +147,7 @@ export function LineChart({
   );
   if (dates.length < 2 || values.length < 2) {
     return (
-      <div className="py-8 text-center text-[10px] uppercase tracking-[0.2em] text-muted-foreground">
-        Not enough data yet
-      </div>
+      <div className="py-8 text-center text-xs text-muted-foreground">Not enough data yet</div>
     );
   }
   const levelValues = levels.map((level) => level.value);
@@ -236,7 +234,7 @@ export function LineChart({
           {dates[dates.length - 1]}
         </text>
       </svg>
-      <div className="mt-1 flex flex-wrap gap-4 text-[10px] text-muted-foreground">
+      <div className="mt-1 flex flex-wrap gap-4 text-xs text-muted-foreground">
         {series.map((s) => (
           <span key={s.name} className="inline-flex items-center gap-1.5">
             <span className="inline-block h-0.5 w-3" style={{ background: s.color }} /> {s.name}

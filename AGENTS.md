@@ -68,9 +68,11 @@ npm run typecheck && npm run lint                # frontend checks
 - **Skills are process, not beliefs.** A skill says how to check something with the tools, never
   "X tends to go up after Y" unless it is generated from reliable event studies. Bump `version` when
   a skill's meaning changes so the track record compares versions separately.
-- **Styling**: Tailwind v4 with the semantic tokens in `src/styles.css` (`bull`, `bear`,
-  `primary`, `muted-foreground`), the `terminal-panel` utility, uppercase wide-tracked labels.
-  Use the primitives in `src/features/shell/ui.tsx`.
+- **Styling (Dark Pro)**: Tailwind v4 with the tokens in `src/styles.css`: near-black panels
+  (`terminal-panel`, rounded 20px, thin border), one flat green accent (`primary`; `bull`/`bear`
+  for gains and losses), no glow or shadows. Quicksand for text in sentence case, `font-mono`
+  (JetBrains Mono) for prices and figures. The open AI call is the one `accent-card` (green) per
+  screen (`features/recs/AiCallCard.tsx`). Use the primitives in `src/features/shell/ui.tsx`.
 - **Data fetching**: React Query hooks calling `api.*` from `src/lib/api.ts`. Navigation is
   `useNav()` (`?v=view&id=…` in the URL).
 - **Asset classes**: `stock | etf | crypto | forex | commodity | index`; `index` is research-only.

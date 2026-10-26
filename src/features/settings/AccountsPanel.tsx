@@ -67,7 +67,7 @@ export function AccountsPanel() {
               create.mutate();
             }}
           >
-            <label className="space-y-1 text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
+            <label className="space-y-1 text-xs text-muted-foreground">
               <span className="block">New account</span>
               <input
                 className="terminal-input"
@@ -76,7 +76,7 @@ export function AccountsPanel() {
                 onChange={(e) => setDraft({ ...draft, name: e.target.value })}
               />
             </label>
-            <label className="space-y-1 text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
+            <label className="space-y-1 text-xs text-muted-foreground">
               <span className="block">Starting money ($)</span>
               <input
                 className="terminal-input w-32"
@@ -87,7 +87,7 @@ export function AccountsPanel() {
                 onChange={(e) => setDraft({ ...draft, starting_equity: e.target.value })}
               />
             </label>
-            <label className="space-y-1 text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
+            <label className="space-y-1 text-xs text-muted-foreground">
               <span className="block">Trade gate</span>
               <select
                 className="terminal-select"
@@ -150,7 +150,7 @@ function AccountRow({
           {account.name}
           {active && <Badge tone="amber">in use</Badge>}
         </div>
-        <div className="text-[10px] text-muted-foreground">
+        <div className="text-xs text-muted-foreground">
           {account.positions} positions · {account.trade_count} closed trades
         </div>
       </Td>
