@@ -52,7 +52,7 @@ def _validate(payload: dict, price: float) -> dict:
 
 
 def create(payload: dict, *, source: str, run_id: str | None = None, signal_snapshot: dict | None = None,
-           auto_trade: bool | None = None, skills: list[str] | None = None) -> dict:
+           auto_trade: bool | None = None, skills: list[str] | None = None, concentrated: bool = False) -> dict:
     item = universe.require(str(payload.get("instrument_id") or payload.get("symbol") or ""))
     if not item.tradable:
         raise ValueError(f"{item.symbol} is research-only")
@@ -102,7 +102,7 @@ def create(payload: dict, *, source: str, run_id: str | None = None, signal_snap
         try:
             position = paper.open_position(item.id, clean["direction"], stop=clean["stop"], target=clean["target"],
                                            expires_at=expires_at, recommendation_id=rec_id, source=source,
-                                           account_id=account["id"])
+                                           account_id=account["id"], concentrated=concentrated)
             db.execute("UPDATE recommendations SET position_id=COALESCE(position_id, ?) WHERE id=?",
                        (position["id"], rec_id))
         except (ValueError, KeyError) as exc:

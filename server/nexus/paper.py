@@ -113,7 +113,7 @@ def correlated_risk(instrument_id: str, side: str, account_id: str | None = None
 
 def open_position(instrument_id: str, side: str, *, stop: float, target: float | None, expires_at: str | None,
                   recommendation_id: str | None = None, source: str = "manual", quantity: float | None = None,
-                  account_id: str | None = None) -> dict:
+                  account_id: str | None = None, concentrated: bool = False) -> dict:
     item = universe.require(instrument_id)
     if not item.tradable:
         raise ValueError(f"{item.symbol} is research-only")
@@ -126,8 +126,8 @@ def open_position(instrument_id: str, side: str, *, stop: float, target: float |
         raise ValueError(f"Already holding {item.symbol} in {account['name']}")
     risk = correlated_risk(item.id, side, account["id"])
     limit = config.get_float("max_correlated_risk")
-    # An "any" account takes concentrated bets on purpose; strict accounts don't.
-    if risk["units"] > limit and account["gate"] == "strict":
+    # An "any" account (or a /bypass order) takes concentrated bets on purpose; strict accounts don't.
+    if risk["units"] > limit and account["gate"] == "strict" and not concentrated:
         bets = ", ".join(f"{r['symbol']} {r['side']} (rho {r['rho']:.2f})" for r in risk["same_bet"])
         raise ValueError(f"Correlated risk limit: {side} {item.symbol} is the same bet as {bets}; together "
                          f"{risk['units']:.1f} risk budgets, limit {limit:g}")

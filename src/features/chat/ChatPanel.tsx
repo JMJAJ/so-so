@@ -11,6 +11,7 @@ import { useChat } from "./chat-context";
 
 export const COMMANDS: Array<[string, string]> = [
   ["/invest", "find the best trades now and open paper positions"],
+  ["/bypass long NVDA, stop 5%, target 12%", "place your own paper trade, gate off"],
   ["/chart GLD vs SPY", "show anything as a chart"],
   ["/scan", "rank today's best candidates"],
   ["/why NVDA", "full evidence review of one asset"],

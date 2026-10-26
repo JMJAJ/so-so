@@ -232,6 +232,7 @@ def propose_recommendation(**payload) -> dict:
     source = payload.pop("_source", "chat")
     run_id = payload.pop("_run_id", None)
     loaded = payload.pop("_skills", None) or []
+    bypass = bool(payload.pop("_bypass", False)) and source != "analyst"  # a /bypass chat turn
     item = _inst(payload.get("instrument_id", ""))
     snapshot = next((row for row in scan.forecasts() if row["instrument_id"] == item.id), None)
     direction = str(payload.get("direction", "")).lower()
@@ -248,8 +249,10 @@ def propose_recommendation(**payload) -> dict:
     minimum = config.get_float("min_probability")
     account = accounts.get()
     failed_gate = prob["expected_return"] <= 0 or prob["probability"] < minimum
-    # Accounts with gate "any" take what the user asks for (never the unattended analyst's calls).
-    override = failed_gate and account["gate"] == "any" and source != "analyst"
+    # Accounts with gate "any" take what the user asks for (never the unattended analyst's calls),
+    # and so does any account on a /bypass turn.
+    override = failed_gate and (bypass or (account["gate"] == "any" and source != "analyst"))
+    why = "the user placed it with /bypass" if bypass else f"{account['name']} accepts any trade"
     if failed_gate and not override:
         reason = "negative expected value" if prob["expected_return"] <= 0 else f"below the {minimum:.0%} minimum"
         better = probability.best_bracket(item.id, direction, price, minimum, snapshot)
@@ -274,10 +277,12 @@ def propose_recommendation(**payload) -> dict:
         payload["evidence"].append({
             "type": "gate_override",
             "summary": f"Below the evidence gate (expected value {prob['expected_return']:+.2%}, probability "
-                       f"{prob['probability']:.0%}); recorded because {account['name']} accepts any trade.",
+                       f"{prob['probability']:.0%}); recorded because {why}.",
         })
+    # /bypass always opens the position (whatever autopilot says) and skips the correlated-risk limit.
     rec = recommendations.create({**payload, "instrument_id": item.id}, source=source, run_id=run_id,
-                                 signal_snapshot=snapshot, skills=loaded)
+                                 signal_snapshot=snapshot, skills=loaded, auto_trade=True if bypass else None,
+                                 concentrated=bypass)
     result = {
         "paper_position": _position_status(rec),
         "recorded": {k: rec.get(k) for k in ("id", "symbol", "direction", "entry_price", "stop", "target",
@@ -287,7 +292,7 @@ def propose_recommendation(**payload) -> dict:
         "skills_recorded": loaded or "none (load pre-trade-checklist before proposing)",
         "account": account["name"],
         "gate": (f"OVERRIDDEN: this trade fails the evidence gate (expected value {prob['expected_return']:+.2%}). "
-                 f"{account['name']} accepts any trade, so it was recorded; say so plainly."
+                 f"It was recorded because {why}; say so plainly."
                  if override else "passed"),
         "instruction": "Report the paper_position line exactly as stated, and quote the computed probability, "
                        "not your own.",

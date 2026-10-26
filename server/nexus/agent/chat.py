@@ -32,12 +32,22 @@ SLASH = {
                "with a table of the trades (entry, stop, target, probability, key evidence) and the candidates you "
                "rejected and why. Recording zero trades is fine if nothing has real evidence.",
     "/chart": "Show {arg} with show_chart (pick the most fitting kind), then explain what it shows in 2-4 sentences.",
+    "/bypass": "Place this paper trade exactly as I say, without deciding whether it's a good idea: {arg}. Work out "
+               "the instrument, direction, stop, target and horizon from my words. Where I left one out, call "
+               "asset_snapshot and use a stop 2x the daily ATR (vol_20d x price / sqrt(252)) from the price, a target "
+               "twice the stop distance, and 20 sessions. Call propose_recommendation once per trade I asked for, "
+               "with a short thesis in my words. The evidence gate and correlated-risk limit are off for this turn, "
+               "so it is recorded and a paper position opened even with negative expected value. If I ask to close "
+               "a position, use close_recommendation. Then report each paper_position line exactly, with the "
+               "computed probability and expected value in one plain sentence. No checklist, no lecture.",
 }
+BYPASS_EMPTY = ("I typed /bypass without a trade. Ask me which paper trade to place (for example \"/bypass long "
+                "NVDA, stop 5%, target 12%, 3 weeks\"). Don't call propose_recommendation.")
 
 CHAT_EXTRA = """You are talking with the user directly. Use tools before answering factual questions
 about markets; do not answer from memory. Only call propose_recommendation when the user asks you to
-recommend, invest or trade (or uses /recommend or /invest), and close_recommendation only when the user asks
-to review or close positions (/review). Load the matching skill first. Use show_chart when the user asks to see
+recommend, invest or trade (or uses /recommend, /invest or /bypass), and close_recommendation only when the
+user asks to review or close positions (/review, /bypass). Load the matching skill first. Use show_chart when the user asks to see
 something or when a chart makes the answer clearer."""
 
 
@@ -52,9 +62,17 @@ def expand(text: str) -> str:
     arg = arg.strip()
     if command.lower() in ("/scan", "/news", "/backtest", "/invest", "/review", "/skills"):
         return template.format(arg=f" (focus: {arg})" if arg else "", max_recs=config.get_int("analyst_max_recs"))
+    if command.lower() == "/bypass":
+        return template.format(arg=arg) if arg else BYPASS_EMPTY
     if command.lower() == "/chart":
         return template.format(arg=arg or "my paper equity vs the S&P 500")
     return template.format(arg=arg or "the strongest current candidate")
+
+
+def is_bypass(text: str) -> bool:
+    """A /bypass order with a trade in it: the user's own paper trade, placed past the gate."""
+    command, _, arg = text.strip().partition(" ")
+    return command.lower() == "/bypass" and bool(arg.strip())
 
 
 def _account_note() -> str:
@@ -119,11 +137,13 @@ def send(conv_id: str | None, text: str, on_event: Callable[[dict], None] | None
         user["display"] = text
     messages.append(user)
     stored_from = len(messages) - 1
+    # Only this turn's own propose_recommendation calls skip the gate, never later turns.
+    bypass = is_bypass(text)
     system = loop.system_prompt(CHAT_EXTRA + "\n\n" + _account_note() + "\n\nTrack record so far:\n"
                                 + recommendations.lessons())
     try:
         loop.run(llm.create("main"), system, messages, tool_specs=tools.specs(), on_event=on_event,
-                 tool_extra={"_source": "chat"}, effort="medium", max_steps=40)
+                 tool_extra={"_source": "chat", "_bypass": bypass}, effort="medium", max_steps=40)
     except Exception as exc:
         # Drop the half-finished turn (it may end in unanswered tool calls) and record the failure.
         del messages[stored_from + 1:]

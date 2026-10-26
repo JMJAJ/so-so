@@ -326,6 +326,30 @@ def test_any_gate_account_records_failing_trades(synthetic):
     assert is_error
 
 
+def test_bypass_places_the_users_trade_past_the_gate(synthetic):
+    # The default account is strict with autopilot off, so a failing trade is normally refused.
+    text, is_error = tools.call("propose_recommendation", _proposal("stock:msft"), extra={"_source": "chat"})
+    assert is_error and "Not recorded" in text
+    text, is_error = tools.call("propose_recommendation", _proposal("stock:msft"),
+                                extra={"_source": "chat", "_bypass": True})
+    assert not is_error, text
+    result = json.loads(text)
+    assert result["gate"].startswith("OVERRIDDEN") and "/bypass" in result["gate"]
+    assert result["paper_position"].startswith("OPENED:")
+    assert "gate_override" in db.one("SELECT evidence FROM recommendations")["evidence"]
+    # The unattended analyst can never bypass.
+    text, is_error = tools.call("propose_recommendation", _proposal("stock:jpm"),
+                                extra={"_source": "analyst", "_bypass": True})
+    assert is_error
+
+
+def test_bypass_command_needs_a_trade(nexus_db):
+    assert chat.is_bypass("/bypass long NVDA stop 5%") and not chat.is_bypass("/bypass ")
+    assert not chat.is_bypass("go /bypass long NVDA")
+    assert "long NVDA stop 5%" in chat.expand("/bypass long NVDA stop 5%")
+    assert "Don't call propose_recommendation" in chat.expand("/bypass")
+
+
 def test_accounts_api_and_header(client):
     created = client.post("/api/accounts", json={"name": "Side", "starting_equity": 500, "gate": "any"}).json()
     listing = client.get("/api/accounts").json()
