@@ -40,6 +40,10 @@ services:
         value: "15"
       - key: KEEPALIVE_MINUTES
         value: "10"
+      # Weekly research runs on GitHub Actions (.github/workflows/research.yml); this server only
+      # imports the results. Remove to run research here again (needs more than 512 MB).
+      - key: NEXUS_RESEARCH_REMOTE
+        value: "1"
       # Data and AI providers.
       - key: NVIDIA_API_KEY
         sync: false
