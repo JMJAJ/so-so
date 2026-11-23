@@ -1,41 +1,57 @@
-import { useCallback, useEffect, useState } from "react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useCallback, useEffect } from "react";
 
-/** The viewer's watchlist: instrument ids kept in this browser (a per-viewer convenience).
- * Held positions are shown alongside it by the watchlist panel, so they need not be added. */
-const STORAGE_KEY = "nexus.watchlist";
-const DEFAULT = ["etf:spy", "etf:qqq", "stock:nvda", "stock:aapl", "crypto:btc", "commodity:gold"];
+import { api } from "./api";
 
-function read(): string[] {
+/** The watchlist lives on the server, so the phone and the desktop show the same list and
+ * push alerts (nexus/notify.py) watch it. Held positions are shown alongside it by the
+ * watchlist panel, so they need not be added. */
+const LEGACY_KEY = "nexus.watchlist";
+const MIGRATED_KEY = "nexus.watchlist.migrated";
+
+/** Lists starred before the watchlist moved to the server are merged into it once. */
+function takeLegacy(): string[] {
   try {
-    const raw = window.localStorage.getItem(STORAGE_KEY);
-    const parsed: unknown = raw ? JSON.parse(raw) : null;
-    return Array.isArray(parsed)
-      ? parsed.filter((v): v is string => typeof v === "string")
-      : DEFAULT;
+    if (window.localStorage.getItem(MIGRATED_KEY)) return [];
+    window.localStorage.setItem(MIGRATED_KEY, "1");
+    const parsed: unknown = JSON.parse(window.localStorage.getItem(LEGACY_KEY) ?? "null");
+    return Array.isArray(parsed) ? parsed.filter((v): v is string => typeof v === "string") : [];
   } catch {
-    return DEFAULT;
+    return [];
   }
-}
-
-function write(ids: string[]): void {
-  try {
-    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(ids));
-  } catch {
-    // Storage blocked: the change lasts for this visit only.
-  }
-  window.dispatchEvent(new CustomEvent("nexus-watchlist"));
 }
 
 export function useWatchlist() {
-  const [ids, setIds] = useState<string[]>(read);
+  const client = useQueryClient();
+  const query = useQuery({ queryKey: ["watchlist"], queryFn: api.watchlist, staleTime: 60_000 });
+  const ids = query.data?.ids ?? [];
+
+  const save = useMutation({
+    mutationFn: api.saveWatchlist,
+    onMutate: (next: string[]) => {
+      const previous = client.getQueryData<{ ids: string[] }>(["watchlist"]);
+      client.setQueryData(["watchlist"], { ids: next });
+      return { previous };
+    },
+    onError: (_error, _next, context) => {
+      if (context?.previous) client.setQueryData(["watchlist"], context.previous);
+    },
+    onSuccess: (data) => client.setQueryData(["watchlist"], data),
+  });
+
+  const { mutate } = save;
   useEffect(() => {
-    const onChange = () => setIds(read());
-    window.addEventListener("nexus-watchlist", onChange);
-    return () => window.removeEventListener("nexus-watchlist", onChange);
-  }, []);
-  const toggle = useCallback((id: string) => {
-    const current = read();
-    write(current.includes(id) ? current.filter((v) => v !== id) : [...current, id]);
-  }, []);
+    if (!query.data) return;
+    const legacy = takeLegacy().filter((id) => !query.data.ids.includes(id));
+    if (legacy.length) mutate([...query.data.ids, ...legacy]);
+  }, [query.data, mutate]);
+
+  const toggle = useCallback(
+    (id: string) => {
+      const current = client.getQueryData<{ ids: string[] }>(["watchlist"])?.ids ?? [];
+      mutate(current.includes(id) ? current.filter((v) => v !== id) : [...current, id]);
+    },
+    [client, mutate],
+  );
   return { ids, has: (id: string) => ids.includes(id), toggle };
 }

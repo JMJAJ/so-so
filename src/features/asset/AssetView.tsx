@@ -147,12 +147,18 @@ function AssetBody({
   const last = data.bars.at(-1);
   const prev = data.bars.at(-2);
   const quotePrice = data.quote?.price ?? last?.c ?? null;
+  // Change today comes from the live quote (previous close from Yahoo when our bars lag).
+  // Two stored bars are only a stand-in when there is no quote at all; otherwise their
+  // difference could be weeks old and labelled as today.
   const change =
     data.quote?.change_pct != null
       ? data.quote.change_pct / 100
-      : last && prev
+      : data.quote?.price == null && last && prev
         ? last.c / prev.c - 1
         : null;
+  const barDay = last?.t?.slice(0, 10);
+  const quoteDay = data.quote?.as_of?.slice(0, 10);
+  const barIsOld = Boolean(barDay && quoteDay && barDay < quoteDay);
 
   const openCall = data.recommendations.find((rec) => rec.status === "open");
   const ranges: Array<{ key: string; label: string; active: boolean; pick: () => void }> = [
@@ -211,7 +217,15 @@ function AssetBody({
           </span>
         </div>
         {last && (
-          <div className="flex gap-4 pb-1 font-mono text-[13px] text-muted-foreground">
+          <div
+            className="flex gap-4 pb-1 font-mono text-[13px] text-muted-foreground"
+            title={
+              barIsOld
+                ? "Last stored daily bar; today's bar arrives after the daily refresh"
+                : "Daily bar"
+            }
+          >
+            {barIsOld && <span className="font-sans">{barDay}</span>}
             <span>
               O <span className="text-foreground">{price(last.o)}</span>
             </span>

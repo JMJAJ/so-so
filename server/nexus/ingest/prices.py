@@ -106,8 +106,6 @@ def update_bars(
 # ── Live quotes ──────────────────────────────────────────────────────────────
 
 QUOTE_TTL = 30
-# A daily close older than this (weekends + holidays fit) is too stale to measure "today" against.
-PREV_CLOSE_MAX_GAP_DAYS = 5
 STALE_AFTER = {"crypto": 30 * 60, "forex": 60 * 60, "stock": 60 * 60, "etf": 60 * 60, "commodity": 60 * 60, "index": 60 * 60}
 _quotes: dict[str, dict] = {}
 
@@ -167,27 +165,18 @@ def _fetch_quotes(items: list[Instrument], *, period: str, interval: str, fetche
         except Exception:
             missing.extend(batch)
             continue
+        found: list[tuple[Instrument, float, date, pd.Timestamp]] = []
         for item in batch:
             sub = _frame_for(frame, item.provider_symbol, len(batch))
             if sub is None:
                 missing.append(item)
                 continue
             closes = sub["Close"]
-            price = float(closes.iloc[-1])
-            quote_day = pd.Timestamp(closes.index[-1]).date()
-            prev_day = db.one(
-                "SELECT date, close FROM bars WHERE instrument_id=? AND date<? ORDER BY date DESC LIMIT 1",
-                (item.id, quote_day.isoformat()),
-            )
-            if prev_day and (quote_day - date.fromisoformat(prev_day["date"])).days <= PREV_CLOSE_MAX_GAP_DAYS:
-                reference = prev_day["close"]
-            elif prev_day:
-                # Daily bars are behind (the daily job hasn't run): a "change today" against an
-                # old close would be weeks of movement labelled as one day. Report it unknown.
-                reference = None
-            else:
-                reference = float(closes.iloc[0])
             ts = pd.Timestamp(closes.index[-1])
+            found.append((item, float(closes.iloc[-1]), ts.date(), ts))
+        references = previous_closes([(item, day) for item, _, day, _ in found])
+        for item, price, _, ts in found:
+            reference = references.get(item.id)
             if ts.tzinfo is None:
                 ts = ts.tz_localize("UTC")
             _quotes[item.id] = {
@@ -197,6 +186,55 @@ def _fetch_quotes(items: list[Instrument], *, period: str, interval: str, fetche
                 "fetched_at": fetched_at,
             }
     return missing
+
+
+# Previous session close per instrument, keyed by the quote's session day: one lookup per day.
+_prev_close: dict[str, tuple[date, float | None]] = {}
+
+
+def previous_closes(items: list[tuple[Instrument, date]]) -> dict[str, float | None]:
+    """Close of the last session before `day` for each instrument. Stored daily bars are used
+    when they reach that session; otherwise (the daily job hasn't run, e.g. after the server was
+    off for a while) Yahoo's daily bars are asked, so "change today" never depends on our own
+    ingestion being up to date."""
+    out: dict[str, float | None] = {}
+    ask: list[tuple[Instrument, date]] = []
+    for item, day in items:
+        cached = _prev_close.get(item.id)
+        if cached and cached[0] == day and cached[1] is not None:
+            out[item.id] = cached[1]
+            continue
+        row = db.one("SELECT date, close FROM bars WHERE instrument_id=? AND date<? ORDER BY date DESC LIMIT 1",
+                     (item.id, day.isoformat()))
+        # Stored history reaching the previous weekday (or close: weekends, holidays) is current.
+        if row and (day - date.fromisoformat(row["date"])).days <= _session_gap(day, item):
+            out[item.id] = row["close"]
+            _prev_close[item.id] = (day, row["close"])
+        else:
+            ask.append((item, day))
+    for offset in range(0, len(ask), BATCH):
+        batch = ask[offset:offset + BATCH]
+        try:
+            frame = yf.download([item.provider_symbol for item, _ in batch], period="10d", interval="1d",
+                                group_by="ticker", auto_adjust=True, threads=True, progress=False)
+        except Exception:
+            frame = None
+        for item, day in batch:
+            sub = _frame_for(frame, item.provider_symbol, len(batch)) if frame is not None else None
+            value = None
+            if sub is not None:
+                before = [float(close) for ts, close in sub["Close"].items() if pd.Timestamp(ts).date() < day]
+                value = before[-1] if before else None
+            out[item.id] = value
+            _prev_close[item.id] = (day, value)
+    return out
+
+
+def _session_gap(day: date, item: Instrument) -> int:
+    """Calendar days back to the previous session: 1 for 24/7 crypto, up to 4 over a long weekend."""
+    if item.asset_class == "crypto":
+        return 1
+    return 3 if day.weekday() == 0 else 1 if day.weekday() < 5 else 2
 
 
 # ── Intraday bars (asset charts) ─────────────────────────────────────────────

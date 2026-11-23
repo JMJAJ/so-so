@@ -89,6 +89,8 @@ Get-Content data\.secret
    | `NVIDIA_API_KEY` | your NVIDIA NIM key |
    | `FINNHUB_API_KEY` | your Finnhub key |
    | `FRED_API_KEY` | optional; leave empty if you don't have one |
+   | `NTFY_TOPIC` | optional: your ntfy topic for phone alerts (see "Phone alerts" below); can also be set in Settings |
+   | `NEXUS_PUBLIC_URL` | optional: your Vercel URL, so tapping an alert opens the asset page |
 
 3. Deploy. When it's live, open `https://nexus-api-01di.onrender.com/api/health` (Render shows the
    exact URL; if the name was taken it has a suffix). You want
@@ -138,14 +140,29 @@ it ever being pushed back), runs the research and uploads only the research tabl
 recommendations, news and settings are never in the bundle, so nothing recorded during the run is
 lost. A run that produced no event studies or models is refused on both sides.
 
+## Phone alerts (ntfy)
+
+1. Install **ntfy** on your phone (Play Store / App Store) and subscribe to a long random topic
+   (Settings → Phone alerts → Generate makes one).
+2. Save the same topic in Settings → Phone alerts (or set `NTFY_TOPIC` on Render) and press
+   **Send test**.
+3. Put your Vercel URL in "App link" (or `NEXUS_PUBLIC_URL`) so a tap opens the asset in NEXUS.
+
+You get: top breaking news (and major news on anything you watch, hold or the AI called), moves of
+3σ or more on those assets and the market gauges, every AI buy/sell call with its probability and
+EV, and stops/targets hit. A top story or a ≥4σ move on a watched asset also starts a focused
+analyst run (at most every 3 hours), whose calls arrive as alerts of their own. The topic name is
+the only secret: anyone who knows it can read the alerts.
+
 ## What runs on its own (UTC)
 
 | Job | When |
 |---|---|
 | fills, stops, targets, expiry | every 5 min (every minute while a browser is open) |
-| breaking-news wire | about every minute |
+| breaking-news wire | about every minute (top stories pushed to your phone) |
+| unusual-move check for phone alerts | every 3 min |
 | news + classification | every 10 min |
-| daily data, scoring, post-mortems | 21:45 |
+| daily data, scoring, post-mortems | 21:45, and right after a restart when bars are behind |
 | AI market brief and new calls | 22:30 |
 | event studies, backtest, replay | Saturday 06:00 on GitHub Actions; imported within 15 min |
 

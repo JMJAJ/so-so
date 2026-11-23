@@ -289,6 +289,21 @@ CREATE TABLE IF NOT EXISTS logs (
 );
 CREATE INDEX IF NOT EXISTS idx_logs_created ON logs(created_at DESC);
 
+-- Push notifications (nexus/notify.py). `key` makes each event notify once.
+CREATE TABLE IF NOT EXISTS notifications (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    key TEXT NOT NULL UNIQUE,
+    created_at TEXT NOT NULL,
+    kind TEXT NOT NULL,
+    title TEXT NOT NULL,
+    message TEXT NOT NULL,
+    priority INTEGER NOT NULL,
+    click TEXT,
+    status TEXT NOT NULL,
+    error TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_notifications_created ON notifications(created_at DESC);
+
 CREATE TABLE IF NOT EXISTS schema_meta (
     version INTEGER PRIMARY KEY,
     applied_at TEXT NOT NULL

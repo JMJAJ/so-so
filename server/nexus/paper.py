@@ -206,7 +206,14 @@ def close_position(position_id: str, *, reason: str = "manual", price: float | N
         conn.execute("DELETE FROM positions WHERE id=?", (position_id,))
     db.log("info", "exit", f"Closed {item.symbol} @ {exit_price:.4f} ({reason}); net {gross - fees:+.2f}")
     live.publish("portfolio")
-    return {"trade_id": trade_id, "net_pnl": gross - fees, "exit_price": exit_price, "reason": reason}
+    result = {"trade_id": trade_id, "net_pnl": gross - fees, "exit_price": exit_price, "reason": reason}
+    try:
+        from . import notify
+
+        notify.on_exit(position, result)
+    except Exception as exc:  # notifications are best-effort
+        db.log("warn", "notify", f"exit: {exc}")
+    return result
 
 
 # ── Monitoring ───────────────────────────────────────────────────────────────

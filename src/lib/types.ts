@@ -813,3 +813,23 @@ export type ChatEvent =
   | { type: "done"; stop_reason: string }
   | { type: "error"; message: string }
   | { type: "end" };
+
+export interface NotificationItem {
+  id: number;
+  created_at: string;
+  kind: "news" | "move" | "call" | "exit" | "test" | string;
+  title: string;
+  message: string;
+  priority: number;
+  click: string | null;
+  status: "sending" | "sent" | "error";
+  error: string | null;
+}
+
+export interface NotificationLog {
+  enabled: boolean;
+  topic: string | null;
+  server: string;
+  public_url: string | null;
+  items: NotificationItem[];
+}

@@ -396,6 +396,12 @@ def _raise_alerts(fresh: list[dict], fetched_at: str) -> list[dict]:
                    [(db.dumps({k: a[k] for k in ("kinds", "level", "moves")}), a["id"]) for a in unique] + follow_ups)
     for alert in unique:
         live.publish("alert", alert=alert)
+    try:
+        from .. import notify
+
+        notify.on_alerts(unique)
+    except Exception as exc:  # a notification problem must never stop the wire
+        db.log("warn", "notify", f"alerts: {exc}")
     return unique
 
 

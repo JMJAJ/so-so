@@ -62,7 +62,7 @@ export function TopBar({
         </button>
         <button
           onClick={() => setSearching(true)}
-          className="flex h-9 min-w-0 flex-1 items-center gap-2 rounded-full border border-border bg-raised px-3.5 text-left text-[13px] text-muted-foreground transition-colors hover:border-strong sm:max-w-[360px]"
+          className="flex h-9 min-w-0 flex-1 items-center gap-2 rounded-full border border-border bg-raised px-3.5 text-left text-[13px] text-muted-foreground transition-colors hover:border-strong sm:min-w-[240px] sm:max-w-[360px]"
         >
           <Search className="h-4 w-4 shrink-0" />
           <span className="truncate">Search symbols, pages…</span>
@@ -70,7 +70,7 @@ export function TopBar({
             Ctrl K
           </kbd>
         </button>
-        <div className="hidden min-w-0 flex-1 xl:block">
+        <div className="hidden min-w-0 flex-1 2xl:block">
           <JobLine status={status} />
         </div>
         <div className="ml-auto flex shrink-0 items-center gap-2">
@@ -82,7 +82,7 @@ export function TopBar({
           <div className="hidden md:block">
             <AccountSwitcher />
           </div>
-          {!offline && <MarketChip marketId="nyse" className="hidden shrink-0 lg:inline-flex" />}
+          {!offline && <MarketChip marketId="nyse" className="hidden shrink-0 2xl:inline-flex" />}
           <LiveDot live={live} offline={offline} />
           <button
             className={cn("icon-button hidden xl:inline-flex", railOpen && "!text-foreground")}
