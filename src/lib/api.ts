@@ -1,5 +1,6 @@
 import type {
   NewsAlert,
+  NotificationLog,
   WireSource,
   AssetDetail,
   AssetSimulation,
@@ -198,6 +199,15 @@ export const api = {
     }>(`/chat/${id}`),
   deleteConversation: (id: string) =>
     fetchJson<{ deleted: boolean }>(`/chat/${id}`, send("DELETE")),
+  watchlist: () => fetchJson<{ ids: string[] }>("/watchlist"),
+  saveWatchlist: (ids: string[]) =>
+    fetchJson<{ ids: string[] }>("/watchlist", send("PUT", { ids })),
+  notifications: () => fetchJson<NotificationLog>("/notifications"),
+  testNotification: () =>
+    fetchJson<{ ok: boolean; error?: string | null; topic?: string }>(
+      "/notifications/test",
+      send("POST"),
+    ),
   logs: () =>
     fetchJson<
       Array<{ id: number; created_at: string; level: string; kind: string; message: string }>

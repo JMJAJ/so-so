@@ -17,7 +17,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel
 
-from . import accounts, auth, config, data, db, jobs, keepalive, live, llm, markets, nlp, paper, recommendations, snapshot, universe
+from . import accounts, auth, config, data, db, jobs, keepalive, live, llm, markets, nlp, notify, paper, recommendations, snapshot, universe
 from .agent import analyst, chat, tools
 from .ingest import prices, wire
 from .research import analogs, backtest, correlation, event_study, probability, replay, scan, simulate
@@ -730,6 +730,7 @@ def get_settings():
 @app.put("/api/settings")
 def put_settings(body: SettingsIn):
     body.values.pop("account_started_at", None)  # only a reset sets it; a stale form must not undo one
+    body.values.pop("watchlist", None)  # changed through /api/watchlist only (a stale form would undo stars)
     if "starting_equity" in body.values:
         accounts.update(accounts.current(), starting_equity=body.values["starting_equity"])
         try:
@@ -746,6 +747,34 @@ def put_settings(body: SettingsIn):
         scan._cache["at"] = 0
     live.publish("settings")
     return get_settings()
+
+
+class WatchlistIn(BaseModel):
+    ids: list[str]
+
+
+@app.get("/api/watchlist")
+def get_watchlist():
+    return {"ids": notify.watchlist()}
+
+
+@app.put("/api/watchlist")
+def put_watchlist(body: WatchlistIn):
+    ids = notify.set_watchlist(body.ids[:100])
+    live.publish("watchlist")
+    return {"ids": ids}
+
+
+@app.get("/api/notifications")
+def list_notifications(limit: int = Query(50, ge=1, le=200)):
+    return {"enabled": notify.enabled(), "topic": notify.topic() or None,
+            "server": config.get("ntfy_server"), "public_url": notify.public_url() or None,
+            "items": notify.recent(limit)}
+
+
+@app.post("/api/notifications/test")
+def test_notification():
+    return notify.test()
 
 
 @app.post("/api/llm/test")

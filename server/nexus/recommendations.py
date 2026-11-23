@@ -115,6 +115,12 @@ def create(payload: dict, *, source: str, run_id: str | None = None, signal_snap
     if trade_note:
         rec["trade_note"] = trade_note
     live.publish("recommendations")
+    try:
+        from . import notify
+
+        notify.on_call(rec)
+    except Exception as exc:  # notifications are best-effort
+        db.log("warn", "notify", f"call: {exc}")
     return rec
 
 

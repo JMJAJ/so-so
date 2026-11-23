@@ -8,7 +8,7 @@ import traceback
 from datetime import datetime, timedelta, timezone
 from typing import Callable
 
-from . import config, data, db, live, memory, nlp, paper, recommendations, research_bundle, snapshot, universe
+from . import config, data, db, live, memory, nlp, notify, paper, recommendations, research_bundle, snapshot, universe
 from .ingest import events, gdelt, macro, news, prices, wire
 from .research import backtest, event_study, replay, scan, simulate
 
@@ -21,6 +21,7 @@ _scheduler = None
 def _focus_ids() -> list[str]:
     ids = {row["instrument_id"] for row in db.rows("SELECT instrument_id FROM positions")}
     ids |= {row["instrument_id"] for row in db.rows("SELECT instrument_id FROM recommendations WHERE status='open'")}
+    ids |= set(notify.watchlist())
     try:
         ids |= {row["instrument_id"] for row in scan.ranked(limit=15)}
     except Exception:
@@ -110,11 +111,28 @@ def job_sim_check(progress) -> dict:
     return {k: overall.get(k) for k in ("n", "in80", "in50", "verdict")}
 
 
+_analyst_focus: dict[str, str | None] = {"focus": None}
+
+
 def job_analyst(progress) -> dict:
     from .agent import analyst
 
-    progress("analyst investigating")
-    return analyst.run(on_event=lambda e: e["type"] == "tool_call" and progress(f"tool {e['name']}"))
+    focus, _analyst_focus["focus"] = _analyst_focus["focus"], None
+    progress(f"analyst investigating: {focus[:80]}" if focus else "analyst investigating")
+    return analyst.run(focus=focus, on_event=lambda e: e["type"] == "tool_call" and progress(f"tool {e['name']}"))
+
+
+def run_analyst_async(focus: str) -> None:
+    """Analyst run focused on something that just happened (big move, breaking news)."""
+    if "analyst" in _running:
+        raise RuntimeError("Job analyst is already running")
+    _analyst_focus["focus"] = focus
+    run_async("analyst")
+
+
+def job_watch(progress) -> dict:
+    progress("checking watched assets for abnormal moves")
+    return notify.check_moves()
 
 
 def job_news_backfill(progress) -> dict:
@@ -169,6 +187,7 @@ JOBS: dict[str, tuple[Callable, str]] = {
     "gdelt_backfill": (job_gdelt_backfill, "Backfill GDELT geopolitical history"),
     "research_import": (job_research_import, "Import the latest research bundle computed on GitHub Actions"),
     "sim_check": (job_sim_check, "Simulation honesty check: replay the price simulator on past dates"),
+    "watch": (job_watch, "Push a notification for abnormal moves on watched, held and AI-called assets"),
 }
 
 
@@ -198,7 +217,7 @@ def run(name: str, progress: Callable[[str], None] | None = None) -> dict:
         db.execute("UPDATE jobs SET last_finished=?, last_status='ok', last_error=NULL, last_summary=?, duration_ms=? WHERE name=?",
                    (db.now_iso(), db.dumps(result)[:4000], int((time.time() - started) * 1000), name))
         live.publish("job", name=name, status="ok")
-        if name not in ("monitor", "wire") and not (name == "research_import" and result.get("skipped")):
+        if name not in ("monitor", "wire", "watch") and not (name == "research_import" and result.get("skipped")):
             snapshot.push_async(f"after {name}")
         return result
     except Exception as exc:
@@ -281,7 +300,12 @@ def start_scheduler() -> None:
     scheduler.add_job(safe("monitor"), IntervalTrigger(minutes=5), id="monitor", next_run_time=soon)
     scheduler.add_job(safe("news"), IntervalTrigger(minutes=max(2, config.get_int("news_interval_min"))), id="news",
                       next_run_time=soon)
-    scheduler.add_job(safe("daily"), CronTrigger(hour=21, minute=45, timezone="UTC"), id="daily")
+    # After the server was off (a laptop asleep, a redeploy), catch up now instead of serving
+    # weeks-old bars, regime and forecasts until the next evening run.
+    daily_next = soon + timedelta(minutes=1) if has_data() and bars_behind() else None
+    scheduler.add_job(safe("daily"), CronTrigger(hour=21, minute=45, timezone="UTC"), id="daily",
+                      **({"next_run_time": daily_next} if daily_next else {}))
+    scheduler.add_job(safe("watch"), IntervalTrigger(minutes=3), id="watch", next_run_time=soon + timedelta(seconds=30))
     scheduler.add_job(safe("analyst"), CronTrigger(hour=22, minute=30, timezone="UTC"), id="analyst")
     if research_bundle.remote_research():
         # Research runs on GitHub Actions (.github/workflows/research.yml); only import its results.
@@ -302,6 +326,24 @@ def stop_scheduler() -> None:
     if _scheduler:
         _scheduler.shutdown(wait=False)
         _scheduler = None
+
+
+def bars_behind() -> bool:
+    """Whether stored daily bars miss a completed weekday session."""
+    row = db.one("SELECT MAX(date) d FROM bars WHERE instrument_id='etf:spy'")
+    if not row or not row["d"]:
+        return False
+    last = datetime.fromisoformat(row["d"]).date()
+    now = datetime.now(timezone.utc)
+    # The US session is complete at 21:00 UTC; before that, yesterday is the latest full one.
+    day = now.date() if now.hour >= 21 else now.date() - timedelta(days=1)
+    while day.weekday() >= 5:
+        day -= timedelta(days=1)
+    return last < day
+
+
+def llm_ready() -> bool:
+    return _llm_ready()
 
 
 def _llm_ready() -> bool:

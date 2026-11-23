@@ -6,6 +6,7 @@ import { toast } from "sonner";
 import { Markdown } from "@/features/shell/Markdown";
 
 import { AccountsPanel } from "./AccountsPanel";
+import { NotificationsPanel } from "./NotificationsPanel";
 import {
   Badge,
   ErrorNote,
@@ -29,6 +30,18 @@ const SECRET_LABELS: Record<string, string> = {
   fred_api_key: "FRED API key (optional, first-release macro data)",
 };
 
+/** Saved by their own panels (notifications, watchlist); the main form leaves them alone. */
+const OWN_PANEL_KEYS = new Set([
+  "watchlist",
+  "ntfy_server",
+  "notify_news_level",
+  "notify_move_sigma",
+  "notify_calls",
+  "notify_exits",
+  "notify_auto_analyst",
+  "public_url",
+]);
+
 export default function SettingsView() {
   return (
     <div className="space-y-4">
@@ -36,6 +49,7 @@ export default function SettingsView() {
         title="Settings & system"
         subtitle="AI provider, risk, universe and the background jobs that keep the research current."
       />
+      <NotificationsPanel />
       <AccountsPanel />
       <SettingsForm />
       <JobsPanel />
@@ -56,7 +70,7 @@ function SettingsForm() {
   const save = useMutation({
     mutationFn: () =>
       api.saveSettings(
-        values,
+        Object.fromEntries(Object.entries(values).filter(([key]) => !OWN_PANEL_KEYS.has(key))),
         Object.fromEntries(Object.entries(secrets).filter(([, v]) => v !== "")),
       ),
     onSuccess: () => {

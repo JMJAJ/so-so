@@ -21,7 +21,8 @@ const TOPIC_KEYS: Record<string, string[]> = {
   recommendations: ["dashboard", "portfolio", "track-record", "briefs", "skills", "simulate"],
   news: ["news", "events", "dashboard", "status"],
   alert: ["alerts", "news"],
-  settings: ["settings", "status"],
+  settings: ["settings", "status", "notifications"],
+  watchlist: ["watchlist", "quotes"],
   logs: ["logs"],
   progress: ["status", "jobs"],
 };
@@ -37,6 +38,7 @@ const JOB_KEYS: Record<string, string[]> = {
   monitor: ["portfolio", "dashboard"],
   gdelt_backfill: ["events"],
   sim_check: ["sim-check", "simulate", "portfolio-sim"],
+  watch: ["notifications"],
 };
 
 const DEBOUNCE_MS = 400;

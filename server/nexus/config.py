@@ -22,6 +22,9 @@ SECRET_ENV = {
     "nvidia_api_key": "NVIDIA_API_KEY",
     "finnhub_api_key": "FINNHUB_API_KEY",
     "fred_api_key": "FRED_API_KEY",
+    # ntfy push notifications: the topic name works like a password (anyone who knows it can read).
+    "ntfy_topic": "NTFY_TOPIC",
+    "ntfy_token": "NTFY_TOKEN",
 }
 
 DEFAULTS: dict[str, str] = {
@@ -50,6 +53,21 @@ DEFAULTS: dict[str, str] = {
     "sec_user_agent": "NEXUS research terminal (contact: admin@example.com)",
     # Minutes between the slower news job (Yahoo/Finnhub/GDELT + LLM classification).
     "news_interval_min": "10",
+    # Watchlist shared by every device (comma-separated instrument ids); alerts watch it too.
+    "watchlist": "etf:spy,etf:qqq,stock:nvda,stock:aapl,crypto:btc,commodity:gold",
+    # Push notifications through ntfy (nexus/notify.py). Topic and token are secrets.
+    "ntfy_server": "https://ntfy.sh",
+    # Breaking news: push alerts at this level or above (3 = top only, 2 = major too, 0 = off).
+    # Major (level 2) alerts about a watched, held or AI-called asset are always pushed.
+    "notify_news_level": "3",
+    # Price moves: push when a watched asset moves this many of its own daily σ (0 = off).
+    "notify_move_sigma": "3",
+    "notify_calls": "true",
+    "notify_exits": "true",
+    # A top alert or a big move on a watched asset starts a focused analyst run (at most every 3 h).
+    "notify_auto_analyst": "true",
+    # Where tapping a notification opens: the site you use (Vercel URL). Or set NEXUS_PUBLIC_URL.
+    "public_url": "",
 }
 
 
