@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import { MessageSquare, Sparkles } from "lucide-react";
+import { MessageSquare, Sparkles, Star } from "lucide-react";
 import { lazy, Suspense, useMemo, useState } from "react";
 
 import { FanChart } from "@/features/charts/svg";
@@ -26,6 +26,7 @@ import {
 import { MarketChip } from "@/features/markets/MarketChip";
 import { api } from "@/lib/api";
 import { ago, humanize, pct, price, shortDate, signed, tone } from "@/lib/format";
+import { useWatchlist } from "@/lib/watchlist";
 import { useNav } from "@/lib/nav";
 import { SIGNALS, type AssetDetail, type Instrument, type IntradaySpan } from "@/lib/types";
 import { cn } from "@/lib/utils";
@@ -177,9 +178,10 @@ function AssetBody({
       <div className="flex flex-wrap items-start gap-3">
         <div className="mr-auto min-w-0">
           <div className="flex flex-wrap items-center gap-3">
-            <h1 className="text-[28px] font-semibold leading-tight">
-              {item.symbol} · {item.name}
+            <h1 className="text-2xl font-semibold leading-tight tracking-tight">
+              {item.symbol} <span className="font-normal text-muted-foreground">{item.name}</span>
             </h1>
+            <WatchStar id={item.id} />
             <Badge>{item.asset_class}</Badge>
             {item.sector && <Badge>{item.sector}</Badge>}
           </div>
@@ -249,7 +251,7 @@ function AssetBody({
                   <button
                     className={cn(
                       "secondary-button !min-h-9",
-                      showMacro && "!border-[#1f3a27] !text-bull",
+                      showMacro && "!border-bull-line !text-bull",
                     )}
                     onClick={() => setShowMacro((v) => !v)}
                   >
@@ -684,5 +686,20 @@ function CorrelationPanel({ data }: { data: AssetDetail }) {
         </TableWrap>
       )}
     </Panel>
+  );
+}
+
+function WatchStar({ id }: { id: string }) {
+  const { has, toggle } = useWatchlist();
+  const on = has(id);
+  return (
+    <button
+      className={cn("icon-button !min-h-8 !min-w-8 !p-1.5", on && "!text-amber")}
+      onClick={() => toggle(id)}
+      aria-pressed={on}
+      title={on ? "Remove from watchlist" : "Add to watchlist"}
+    >
+      <Star className={cn("h-4 w-4", on && "fill-current")} />
+    </button>
   );
 }

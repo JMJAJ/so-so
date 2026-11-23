@@ -2,26 +2,26 @@
 @source "../src";
 @import "tw-animate-css";
 
-@import "@fontsource/quicksand/500.css";
-@import "@fontsource/quicksand/600.css";
-@import "@fontsource/quicksand/700.css";
+@import "@fontsource-variable/inter/index.css";
 @import "@fontsource/jetbrains-mono/400.css";
 @import "@fontsource/jetbrains-mono/500.css";
 @import "@fontsource/jetbrains-mono/700.css";
 
 @custom-variant dark (&:is(.dark *));
 
-/* Dark Pro: near-black panels with thin borders, one flat green accent, no glow.
-   Quicksand for text, JetBrains Mono for prices and figures. */
+/* Workspace: neutral surfaces, one blue primary, green/red only for gains and losses.
+   Inter for text in sentence case, JetBrains Mono for prices and figures.
+   Every colour is a token below; views never hard-code hex values. Dark is the default,
+   `html.light` switches the whole app (see src/lib/theme.ts). */
 @theme inline {
-  --font-sans: "Quicksand", system-ui, sans-serif;
-  --font-display: "Quicksand", system-ui, sans-serif;
+  --font-sans: "Inter Variable", "Inter", system-ui, sans-serif;
+  --font-display: "Inter Variable", "Inter", system-ui, sans-serif;
   --font-mono: "JetBrains Mono", ui-monospace, monospace;
 
   --radius-sm: 8px;
   --radius-md: 10px;
   --radius-lg: 14px;
-  --radius-xl: 20px;
+  --radius-xl: 18px;
 
   --color-background: var(--background);
   --color-foreground: var(--foreground);
@@ -31,6 +31,8 @@
   --color-popover-foreground: var(--popover-foreground);
   --color-primary: var(--primary);
   --color-primary-foreground: var(--primary-foreground);
+  --color-primary-strong: var(--primary-strong);
+  --color-primary-soft: var(--primary-soft);
   --color-secondary: var(--secondary);
   --color-secondary-foreground: var(--secondary-foreground);
   --color-muted: var(--muted);
@@ -40,58 +42,128 @@
   --color-destructive: var(--destructive);
   --color-destructive-foreground: var(--destructive-foreground);
   --color-border: var(--border);
+  --color-strong: var(--strong);
+  --color-row-line: var(--row-line);
   --color-input: var(--input);
   --color-ring: var(--ring);
 
   --color-bull: var(--bull);
+  --color-bull-soft: var(--bull-soft);
+  --color-bull-line: var(--bull-line);
   --color-bear: var(--bear);
+  --color-bear-soft: var(--bear-soft);
+  --color-bear-line: var(--bear-line);
   --color-amber: var(--amber);
+  --color-amber-soft: var(--amber-soft);
+  --color-amber-line: var(--amber-line);
   --color-grid: var(--grid);
   --color-glow: var(--glow);
   --color-panel: var(--panel);
   --color-raised: var(--raised);
+  --color-sidebar: var(--sidebar);
 }
 
 :root {
+  color-scheme: dark;
   --radius: 14px;
 
-  --background: #0a0b0a;
-  --foreground: #e7e9e7;
-  --card: #0e100e;
-  --card-foreground: #e7e9e7;
-  --popover: #121412;
-  --popover-foreground: #e7e9e7;
-  --panel: #0e100e;
-  --raised: #151815;
+  --background: #09090b;
+  --sidebar: #0c0c0e;
+  --foreground: #ececef;
+  --card: #111113;
+  --card-foreground: #ececef;
+  --popover: #16161a;
+  --popover-foreground: #ececef;
+  --panel: #111113;
+  --raised: #18181c;
 
-  --primary: #2e9a4e;                 /* flat green accent */
+  --primary: #3b7bff;
+  --primary-strong: #2b63e0;
+  --primary-soft: #14203a;
   --primary-foreground: #ffffff;
 
-  --secondary: #151815;
-  --secondary-foreground: #e7e9e7;
-  --muted: #141714;
-  --muted-foreground: #8b918b;        /* 6:1 on the panels */
-  --accent: #1a1d1a;
-  --accent-foreground: #e7e9e7;
+  --secondary: #18181c;
+  --secondary-foreground: #ececef;
+  --muted: #17171a;
+  --muted-foreground: #8d8d97;
+  --accent: #1c1c21;
+  --accent-foreground: #ececef;
 
-  --destructive: #e5534b;
+  --destructive: #f04f5a;
   --destructive-foreground: #ffffff;
 
-  --border: #1f231f;
-  --input: #111311;
-  --ring: #4fc277;
+  --border: #222227;
+  --strong: #33333a;
+  --row-line: #1a1a1e;
+  --input: #0f0f12;
+  --ring: #5b91ff;
 
-  --bull: #5cc982;                    /* gains, text and fills */
-  --bear: #ef7468;                    /* losses */
-  --amber: #e2b04f;                   /* caution only */
-  --grid: #171a17;
+  --bull: #2ec27e;
+  --bull-soft: #0f1f18;
+  --bull-line: #1d3d2e;
+  --bear: #f2555f;
+  --bear-soft: #241214;
+  --bear-line: #44222a;
+  --amber: #e6b450;
+  --amber-soft: #221b0e;
+  --amber-line: #45381d;
+  --grid: #18181c;
   --glow: transparent;
 
-  --chart-1: #5cc982;
-  --chart-2: #e7e9e7;
-  --chart-3: #ef7468;
-  --chart-4: #6fa8dc;
+  --chart-1: #3b7bff;
+  --chart-2: #ececef;
+  --chart-3: #f2555f;
+  --chart-4: #2ec27e;
   --chart-5: #b38ad9;
+}
+
+:root.light {
+  color-scheme: light;
+  --background: #f5f6f8;
+  --sidebar: #fbfbfc;
+  --foreground: #0f1115;
+  --card: #ffffff;
+  --card-foreground: #0f1115;
+  --popover: #ffffff;
+  --popover-foreground: #0f1115;
+  --panel: #ffffff;
+  --raised: #f2f3f6;
+
+  --primary: #2f6bff;
+  --primary-strong: #2255d6;
+  --primary-soft: #e8efff;
+  --primary-foreground: #ffffff;
+
+  --secondary: #f2f3f6;
+  --secondary-foreground: #0f1115;
+  --muted: #eef0f3;
+  --muted-foreground: #5f6672;
+  --accent: #eceef2;
+  --accent-foreground: #0f1115;
+
+  --destructive: #dc2f3c;
+  --border: #e3e5ea;
+  --strong: #cdd1d8;
+  --row-line: #eef0f3;
+  --input: #ffffff;
+  --ring: #2f6bff;
+
+  --bull: #0a9a5c;
+  --bull-soft: #e7f6ee;
+  --bull-line: #b9e3cc;
+  --bear: #d92d3a;
+  --bear-soft: #fdecee;
+  --bear-line: #f4c2c7;
+  --amber: #a86a00;
+  --amber-soft: #fdf4e1;
+  --amber-line: #efd6a3;
+  --grid: #eef0f3;
+
+  --chart-1: #2f6bff;
+  --chart-2: #0f1115;
+  --chart-3: #d92d3a;
+  --chart-4: #0a9a5c;
+  --chart-5: #8a5cc7;
 }
 
 @layer base {
@@ -99,15 +171,35 @@
     border-color: var(--color-border);
   }
 
-  html, body {
+  html,
+  body {
     background-color: var(--color-background);
     color: var(--color-foreground);
     font-family: var(--font-sans);
-    font-weight: 500;
-    font-feature-settings: "tnum";
+    font-weight: 450;
+    font-feature-settings: "tnum", "cv11";
+    -webkit-font-smoothing: antialiased;
     min-width: 0;
     max-width: 100%;
     overflow-x: hidden;
+  }
+
+  ::selection {
+    background: color-mix(in srgb, var(--primary) 35%, transparent);
+  }
+
+  ::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+  ::-webkit-scrollbar-thumb {
+    background: var(--strong);
+    border-radius: 10px;
+    border: 3px solid transparent;
+    background-clip: content-box;
+  }
+  ::-webkit-scrollbar-track {
+    background: transparent;
   }
 }
 
@@ -117,19 +209,19 @@
     align-items: center;
     justify-content: center;
     gap: 0.4rem;
-    min-height: 2.5rem;
-    border-radius: 12px;
+    min-height: 2.25rem;
+    border-radius: 999px;
     border: 1px solid transparent;
     background: var(--color-primary);
     color: var(--color-primary-foreground);
     padding: 0 1rem;
-    font-size: 0.875rem;
-    font-weight: 700;
-    transition: background 160ms ease;
+    font-size: 0.8125rem;
+    font-weight: 600;
+    transition: background 140ms ease;
   }
 
   .primary-button:hover:not(:disabled) {
-    background: #34ab58;
+    background: var(--color-primary-strong);
   }
 
   .primary-button:disabled,
@@ -147,38 +239,41 @@
     align-items: center;
     justify-content: center;
     gap: 0.4rem;
-    border-radius: 12px;
+    border-radius: 999px;
     border: 1px solid var(--color-border);
-    background: var(--input);
+    background: var(--color-raised);
     color: var(--color-foreground);
     font-size: 0.8125rem;
-    font-weight: 600;
-    transition: border-color 160ms ease, background 160ms ease;
+    font-weight: 550;
+    transition:
+      border-color 140ms ease,
+      background 140ms ease,
+      color 140ms ease;
   }
 
   .secondary-button,
   .danger-button {
-    min-height: 2.5rem;
-    padding: 0 0.9rem;
+    min-height: 2.25rem;
+    padding: 0 0.95rem;
   }
 
   .icon-button {
-    min-width: 2.5rem;
-    min-height: 2.5rem;
-    padding: 0.5rem;
+    min-width: 2.25rem;
+    min-height: 2.25rem;
+    padding: 0.45rem;
     color: var(--color-muted-foreground);
   }
 
   .secondary-button:hover:not(:disabled),
   .icon-button:hover:not(:disabled) {
-    border-color: #2f352f;
-    background: var(--color-raised);
+    border-color: var(--color-strong);
+    background: var(--color-accent);
     color: var(--color-foreground);
   }
 
   .danger-button {
-    border-color: #3a2220;
-    background: #1c1110;
+    border-color: var(--color-bear-line);
+    background: var(--color-bear-soft);
     color: var(--color-bear);
   }
 
@@ -189,16 +284,17 @@
   .terminal-input,
   .terminal-select {
     width: 100%;
-    min-height: 2.5rem;
+    min-height: 2.25rem;
     border: 1px solid var(--color-border);
-    border-radius: 12px;
+    border-radius: 10px;
     background: var(--input);
     color: var(--color-foreground);
-    padding: 0.5rem 0.8rem;
+    padding: 0.45rem 0.75rem;
     font-family: var(--font-sans);
-    font-size: 0.875rem;
-    font-weight: 500;
+    font-size: 0.8125rem;
+    font-weight: 450;
     outline: none;
+    transition: border-color 140ms ease;
   }
 
   .terminal-input:focus,
@@ -206,11 +302,39 @@
     border-color: var(--ring);
   }
 
+  /* Segmented control (tabs, ranges): one pill track, the selected segment raised. */
+  .segmented {
+    display: inline-flex;
+    gap: 2px;
+    padding: 3px;
+    border-radius: 999px;
+    background: var(--color-muted);
+    border: 1px solid var(--color-border);
+  }
+  .segmented > button {
+    border-radius: 999px;
+    padding: 0.3rem 0.85rem;
+    font-size: 0.8125rem;
+    font-weight: 550;
+    color: var(--color-muted-foreground);
+    transition:
+      background 140ms ease,
+      color 140ms ease;
+  }
+  .segmented > button:hover {
+    color: var(--color-foreground);
+  }
+  .segmented > button[aria-pressed="true"] {
+    background: var(--color-panel);
+    color: var(--color-foreground);
+    box-shadow: 0 0 0 1px var(--color-strong);
+  }
+
   /* The one highlighted card per screen (the AI call). Flat gradient, no shadow. */
   .accent-card {
-    border-radius: 20px;
-    border: 1px solid #2f7e47;
-    background: linear-gradient(160deg, #2e9a4e 0%, #1e6e37 55%, #164f28 100%);
+    border-radius: 18px;
+    border: 1px solid var(--color-primary-strong);
+    background: linear-gradient(150deg, #3b7bff 0%, #2b5fd9 55%, #2048ad 100%);
     color: #ffffff;
   }
 }
@@ -224,7 +348,9 @@ select:focus-visible {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  *, *::before, *::after {
+  *,
+  *::before,
+  *::after {
     animation-duration: 0.01ms !important;
     animation-iteration-count: 1 !important;
     scroll-behavior: auto !important;
@@ -235,7 +361,7 @@ select:focus-visible {
 @utility terminal-panel {
   background-color: var(--color-panel);
   border: 1px solid var(--color-border);
-  border-radius: 20px;
+  border-radius: 18px;
 }
 
 @utility dot-grid {
@@ -243,20 +369,47 @@ select:focus-visible {
   background-size: 16px 16px;
 }
 
-/* Kept as no-ops so older markup doesn't break: Dark Pro has no glow. */
+/* Kept as no-ops so older markup doesn't break: no glow. */
 @utility glow-amber {
   box-shadow: none;
 }
 
 @utility ticker-scroll {
-  animation: ticker 60s linear infinite;
+  animation: ticker 90s linear infinite;
 }
 
 @keyframes ticker {
-  0% { transform: translateX(0); }
-  100% { transform: translateX(-50%); }
+  0% {
+    transform: translateX(0);
+  }
+  100% {
+    transform: translateX(-50%);
+  }
 }
 
 @utility pulse-dot {
-  animation: none;
+  animation: pulse-dot 1.8s ease-in-out infinite;
+}
+
+@keyframes pulse-dot {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.35;
+  }
+}
+
+@utility flash-in {
+  animation: flash-in 1.2s ease-out;
+}
+
+@keyframes flash-in {
+  0% {
+    background-color: color-mix(in srgb, var(--primary) 22%, transparent);
+  }
+  100% {
+    background-color: transparent;
+  }
 }

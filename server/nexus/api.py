@@ -19,7 +19,7 @@ from pydantic import BaseModel
 
 from . import accounts, auth, config, data, db, jobs, keepalive, live, llm, markets, nlp, paper, recommendations, snapshot, universe
 from .agent import analyst, chat, tools
-from .ingest import prices
+from .ingest import prices, wire
 from .research import analogs, backtest, correlation, event_study, probability, replay, scan, simulate
 from .research.features import asset_features, regime_frame, regime_label
 from .taxonomy import EVENT_TYPES, NEWS_CATEGORIES, label
@@ -263,6 +263,15 @@ def get_universe():
     return clean([{**item, "quote": quotes.get(item["id"])} for item in universe.catalog()])
 
 
+@app.get("/api/quotes")
+def get_quotes(ids: str = Query(..., max_length=2000)):
+    """Quotes for a short list of instruments (watchlist, ticker tape), with symbol and name."""
+    items = [item for value in ids.split(",")[:40] if (item := universe.resolve(value.strip()))]
+    quotes = prices.quotes([item.id for item in items])
+    return clean([{"id": item.id, "symbol": item.symbol, "name": item.name, "asset_class": item.asset_class,
+                   "quote": quotes.get(item.id)} for item in items])
+
+
 @app.get("/api/forecasts")
 def forecasts(asset_class: str | None = None):
     rows = scan.forecasts()
@@ -363,6 +372,17 @@ def list_news(instrument: str | None = None, category: str | None = None, days: 
     item = universe.require(instrument) if instrument else None
     return clean(nlp.recent(item.id if item else None, days=days, limit=limit, min_magnitude=min_magnitude,
                             category=category))
+
+
+@app.get("/api/news/alerts")
+def news_alerts(minutes: int = Query(24 * 60, ge=5, le=7 * 24 * 60), min_level: int = Query(1, ge=1, le=3),
+                limit: int = Query(100, ge=1, le=300)):
+    return clean(wire.recent_alerts(minutes=minutes, min_level=min_level, limit=limit))
+
+
+@app.get("/api/news/sources")
+def news_sources():
+    return clean(wire.sources())
 
 
 @app.get("/api/news-categories")

@@ -24,7 +24,9 @@ export function Panel({
       {(title || actions) && (
         <header className="flex flex-wrap items-center justify-between gap-2 px-5 pt-4 pb-1">
           <div className="min-w-0">
-            {title && <h2 className="text-base font-semibold text-foreground">{title}</h2>}
+            {title && (
+              <h2 className="text-[15px] font-semibold tracking-tight text-foreground">{title}</h2>
+            )}
             {subtitle && (
               <p className="mt-0.5 max-w-3xl text-xs leading-relaxed text-muted-foreground">
                 {subtitle}
@@ -51,7 +53,7 @@ export function PageHeading({
   return (
     <div className="mb-5 flex flex-wrap items-end justify-between gap-3">
       <div className="min-w-0">
-        <h1 className="text-[28px] font-semibold leading-tight">{title}</h1>
+        <h1 className="text-2xl font-semibold leading-tight tracking-tight">{title}</h1>
         {subtitle && (
           <p className="mt-1 max-w-3xl text-sm leading-relaxed text-muted-foreground">{subtitle}</p>
         )}
@@ -74,9 +76,12 @@ export function Stat({
 }) {
   return (
     <div className="min-w-0">
-      <div className="text-xs font-semibold text-muted-foreground">{label}</div>
+      <div className="text-xs font-medium text-muted-foreground">{label}</div>
       <div
-        className={cn("mt-1 truncate font-mono text-xl font-semibold tabular-nums", valueClassName)}
+        className={cn(
+          "mt-1 truncate font-mono text-xl font-semibold tracking-tight tabular-nums",
+          valueClassName,
+        )}
       >
         {value}
       </div>
@@ -86,10 +91,11 @@ export function Stat({
 }
 
 const BADGE_TONES = {
-  neutral: "border-border text-muted-foreground",
-  bull: "border-[#1f3a27] text-bull bg-[#0f1a12]",
-  bear: "border-[#3a2220] text-bear bg-[#1c1110]",
-  amber: "border-[#3d3220] text-amber bg-[#1c170e]",
+  neutral: "border-border bg-muted text-muted-foreground",
+  bull: "border-bull-line text-bull bg-bull-soft",
+  bear: "border-bear-line text-bear bg-bear-soft",
+  amber: "border-amber-line text-amber bg-amber-soft",
+  primary: "border-primary/30 text-primary bg-primary-soft",
 } as const;
 
 export function Badge({
@@ -104,7 +110,7 @@ export function Badge({
   return (
     <span
       className={cn(
-        "inline-flex items-center gap-1 whitespace-nowrap rounded-md border px-2 py-0.5 text-[11px] font-bold",
+        "inline-flex items-center gap-1 whitespace-nowrap rounded-full border px-2 py-0.5 text-[11px] font-semibold",
         BADGE_TONES[tone],
         className,
       )}
@@ -145,14 +151,14 @@ export function Empty({
 export function Loading({ label = "Loading" }: { label?: string }) {
   return (
     <div className="flex items-center gap-2 py-8 text-sm text-muted-foreground">
-      <Loader2 className="h-4 w-4 animate-spin text-bull" /> {label}
+      <Loader2 className="h-4 w-4 animate-spin text-primary" /> {label}
     </div>
   );
 }
 
 export function ErrorNote({ error }: { error: unknown }) {
   return (
-    <div className="rounded-xl border border-[#3a2220] bg-[#1c1110] px-3 py-2 text-sm text-bear">
+    <div className="rounded-xl border border-bear-line bg-bear-soft px-3 py-2 text-sm text-bear">
       {error instanceof Error ? error.message : "Something went wrong"}
     </div>
   );
@@ -170,7 +176,7 @@ export function Th({
   return (
     <th
       className={cn(
-        "whitespace-nowrap border-b border-border px-2 py-2 text-xs font-semibold text-muted-foreground",
+        "whitespace-nowrap border-b border-border px-2 py-2 text-[11px] font-medium text-muted-foreground",
         right ? "text-right" : "text-left",
         className,
       )}
@@ -198,7 +204,7 @@ export function Td({
       title={title}
       colSpan={colSpan}
       className={cn(
-        "whitespace-nowrap border-b border-[#161916] px-2 py-2.5 text-[13px] tabular-nums",
+        "whitespace-nowrap border-b border-row-line px-2 py-2.5 text-[13px] tabular-nums",
         right && "text-right",
         className,
       )}
@@ -212,6 +218,33 @@ export function TableWrap({ children }: { children: ReactNode }) {
   return (
     <div className="-mx-5 overflow-x-auto px-5">
       <table className="w-full border-collapse">{children}</table>
+    </div>
+  );
+}
+
+/** Segmented control (Revolut/TradingView style range and tab switcher). */
+export function Segmented<T extends string | number>({
+  value,
+  options,
+  onChange,
+  className,
+}: {
+  value: T;
+  options: Array<{ value: T; label: ReactNode }>;
+  onChange: (value: T) => void;
+  className?: string;
+}) {
+  return (
+    <div className={cn("segmented", className)} role="group">
+      {options.map((option) => (
+        <button
+          key={String(option.value)}
+          aria-pressed={option.value === value}
+          onClick={() => onChange(option.value)}
+        >
+          {option.label}
+        </button>
+      ))}
     </div>
   );
 }

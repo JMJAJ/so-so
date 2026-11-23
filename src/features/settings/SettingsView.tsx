@@ -284,7 +284,7 @@ function SettingsForm() {
                   key={cls}
                   className={cn(
                     "secondary-button",
-                    on && "!border-[#2f352f] !bg-accent !text-foreground",
+                    on && "!border-strong !bg-accent !text-foreground",
                   )}
                   onClick={() =>
                     set(

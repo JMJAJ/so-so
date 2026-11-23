@@ -44,6 +44,12 @@ DEFAULTS: dict[str, str] = {
     "history_years": "10",
     "gdelt_backfill_days": "365",
     "scheduler_enabled": "true",
+    # Breaking-news wire (ingest/wire.py): ~50 feeds polled about every minute.
+    "wire_enabled": "true",
+    # SEC EDGAR asks automated clients to identify themselves with a contact; set yours in Settings.
+    "sec_user_agent": "NEXUS research terminal (contact: admin@example.com)",
+    # Minutes between the slower news job (Yahoo/Finnhub/GDELT + LLM classification).
+    "news_interval_min": "10",
 }
 
 

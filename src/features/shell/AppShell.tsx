@@ -1,23 +1,44 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { BarChart3, Loader2, MessageSquare } from "lucide-react";
-import { Suspense, useEffect } from "react";
+import { Activity, Briefcase, Loader2, MessageSquare, Newspaper, Telescope } from "lucide-react";
+import { Suspense, useEffect, useState } from "react";
 
 import ChatDrawer from "@/features/chat/ChatDrawer";
-import { MarketChip } from "@/features/markets/MarketChip";
 import { useChat } from "@/features/chat/chat-context";
 import { api } from "@/lib/api";
-import { ago } from "@/lib/format";
-import { useLiveUpdates, type LiveState } from "@/lib/live";
+import { useLiveUpdates } from "@/lib/live";
 import { useNav, type View } from "@/lib/nav";
 import type { SystemStatus } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
-import { AccountSwitcher } from "./AccountSwitcher";
+import { RightRail } from "./RightRail";
+import { Sidebar } from "./Sidebar";
+import { TopBar } from "./TopBar";
 import { Loading } from "./ui";
-import { VIEWS, warmAll, warmView } from "./views";
+import { VIEWS, warmAll } from "./views";
 
+function usePersistentFlag(key: string, initial: boolean) {
+  const [value, setValue] = useState<boolean>(() => {
+    try {
+      const stored = window.localStorage.getItem(key);
+      return stored == null ? initial : stored === "1";
+    } catch {
+      return initial;
+    }
+  });
+  const update = (next: boolean) => {
+    setValue(next);
+    try {
+      window.localStorage.setItem(key, next ? "1" : "0");
+    } catch {
+      // Storage blocked: the layout choice lasts for this visit.
+    }
+  };
+  return [value, update] as const;
+}
+
+/** Workspace layout: sidebar | (top bar + page) | watchlist and live wire; chat slides over. */
 export default function AppShell() {
-  const { view, go } = useNav();
+  const { view } = useNav();
   const chat = useChat();
   const client = useQueryClient();
   const status = useQuery({
@@ -28,194 +49,152 @@ export default function AppShell() {
     retry: false,
   });
   const live = useLiveUpdates();
-  const warm = (key: View) => void warmView(client, key);
+  const [collapsed, setCollapsed] = usePersistentFlag("nexus.sidebar-collapsed", false);
+  const [railOpen, setRailOpen] = usePersistentFlag("nexus.rail-open", true);
+  const [menuOpen, setMenuOpen] = useState(false);
 
-  // Once the current tab has loaded, fetch every other tab's code and data in the background
-  // so switching tabs shows content immediately.
+  // Once the current page has loaded, fetch every other page's code and data in the background
+  // so switching pages shows content immediately.
   useEffect(() => {
     const timer = window.setTimeout(() => void warmAll(client, view), 1500);
     return () => window.clearTimeout(timer);
-    // Only on first load: later tab switches warm on hover.
+    // Only on first load: later switches warm on hover.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [client]);
+
   const Current = VIEWS[view].component;
   const drawerOpen = chat.open && view !== "chat";
+  const offline = Boolean(status.error);
+  const showRail = railOpen && !drawerOpen && view !== "chat" && !offline;
 
   return (
-    <div className={cn("min-h-screen transition-[padding]", drawerOpen && "sm:pr-[460px]")}>
-      <aside className="fixed inset-y-0 left-0 z-30 hidden w-[88px] flex-col items-center gap-2.5 border-r border-border bg-background py-5 lg:flex">
-        <Brand status={status.data} />
-        <nav aria-label="Main" className="flex flex-1 flex-col items-center gap-2">
-          {(Object.keys(VIEWS) as View[]).map((key) => {
-            const Icon = VIEWS[key].icon;
-            const active = view === key;
-            return (
-              <button
-                key={key}
-                onClick={() => go(key)}
-                onMouseEnter={() => warm(key)}
-                onFocus={() => warm(key)}
-                aria-label={VIEWS[key].label}
-                aria-current={active ? "page" : undefined}
-                title={VIEWS[key].label}
-                className={cn(
-                  "grid h-12 w-12 place-items-center rounded-[14px] transition-colors",
-                  active
-                    ? "bg-primary text-primary-foreground"
-                    : "bg-raised text-muted-foreground hover:bg-accent hover:text-foreground",
-                )}
-              >
-                <Icon className="h-5 w-5" />
-              </button>
-            );
-          })}
-        </nav>
-      </aside>
+    <div className="flex h-dvh overflow-hidden bg-background">
+      <Sidebar
+        status={status.data}
+        collapsed={collapsed}
+        onCollapse={() => setCollapsed(!collapsed)}
+        className="hidden shrink-0 lg:flex"
+      />
 
-      <div className="lg:pl-[88px]">
-        <header className="sticky top-0 z-20 flex flex-wrap items-center gap-2.5 border-b border-border bg-background/95 px-4 py-3 backdrop-blur lg:px-7">
-          <div className="lg:hidden">
-            <Brand status={status.data} compact />
-          </div>
-          <nav aria-label="Main" className="flex min-w-0 flex-1 gap-1.5 overflow-x-auto lg:hidden">
-            {(Object.keys(VIEWS) as View[]).map((key) => {
-              const Icon = VIEWS[key].icon;
-              return (
-                <button
-                  key={key}
-                  onClick={() => go(key)}
-                  onTouchStart={() => warm(key)}
-                  className={cn(
-                    "icon-button shrink-0",
-                    view === key && "!border-primary !bg-primary !text-primary-foreground",
-                  )}
-                  aria-label={VIEWS[key].label}
-                >
-                  <Icon className="h-4 w-4" />
-                </button>
-              );
-            })}
-          </nav>
-          <div className="hidden min-w-0 flex-1 lg:block">
-            <BootstrapBanner status={status.data} />
-          </div>
-          {status.data?.analyst_running && (
-            <span className="flex items-center gap-1.5 text-xs font-semibold text-bull">
-              <Loader2 className="h-3.5 w-3.5 animate-spin" /> Analyst researching
-            </span>
+      {menuOpen && (
+        <div className="fixed inset-0 z-50 lg:hidden">
+          <button
+            className="absolute inset-0 bg-black/50"
+            aria-label="Close menu"
+            onClick={() => setMenuOpen(false)}
+          />
+          <Sidebar
+            status={status.data}
+            collapsed={false}
+            onNavigate={() => setMenuOpen(false)}
+            className="relative z-10 shadow-2xl"
+          />
+        </div>
+      )}
+
+      <div
+        className={cn(
+          "flex min-w-0 flex-1 flex-col transition-[padding]",
+          drawerOpen && "sm:pr-[460px]",
+        )}
+      >
+        <TopBar
+          status={status.data}
+          offline={offline}
+          live={live}
+          chatOpen={drawerOpen}
+          onChat={view !== "chat" ? () => chat.setOpen(!chat.open) : undefined}
+          onMenu={() => setMenuOpen(true)}
+          railOpen={railOpen}
+          onRail={() => setRailOpen(!railOpen)}
+        />
+        <div className="flex min-h-0 flex-1">
+          <main className="min-w-0 flex-1 overflow-y-auto" id="main">
+            <div className="mx-auto max-w-[1480px] px-4 pt-5 pb-24 lg:px-7 lg:pb-10">
+              <BootstrapBanner status={status.data} />
+              {offline ? (
+                <Offline />
+              ) : (
+                <Suspense fallback={<Loading />}>
+                  <Current />
+                </Suspense>
+              )}
+            </div>
+          </main>
+          {showRail && (
+            <div className="hidden shrink-0 xl:block">
+              <RightRail />
+            </div>
           )}
-          <AccountSwitcher />
-          {!status.error && (
-            <MarketChip marketId="nyse" className="hidden shrink-0 md:inline-flex" />
-          )}
-          <LiveDot live={live} offline={Boolean(status.error)} />
-          {view !== "chat" && (
-            <button
-              className={cn("primary-button", drawerOpen && "!bg-[#1e6e37]")}
-              onClick={() => chat.setOpen(!chat.open)}
-            >
-              <MessageSquare className="h-4 w-4" /> Ask AI
-            </button>
-          )}
-        </header>
-        <main className="mx-auto max-w-[1600px] px-4 py-6 lg:px-7">
-          <div className="mb-3 lg:hidden">
-            <BootstrapBanner status={status.data} />
-          </div>
-          {status.error ? (
-            <Offline />
-          ) : (
-            <Suspense fallback={<Loading />}>
-              <Current />
-            </Suspense>
-          )}
-        </main>
+        </div>
       </div>
+      <MobileTabs />
       <ChatDrawer />
     </div>
   );
 }
 
-function LiveDot({ live, offline }: { live: LiveState; offline: boolean }) {
-  const last = live.lastEventAt
-    ? ` (last update ${new Date(live.lastEventAt).toLocaleTimeString()})`
-    : "";
-  const on = live.connected && !offline;
-  return (
-    <span
-      className={cn(
-        "inline-flex min-h-10 shrink-0 items-center gap-2 rounded-xl border px-3 text-xs font-semibold",
-        on ? "border-[#1f3a27] bg-[#0f1a12] text-bull" : "border-border text-muted-foreground",
-      )}
-      title={
-        on
-          ? `Live: pages refresh as soon as data changes${last}`
-          : offline
-            ? "Backend offline"
-            : "Reconnecting to live updates; pages still refresh on a timer"
-      }
-    >
-      <span className={cn("h-1.5 w-1.5 rounded-full", on ? "bg-bull" : "bg-bear")} />
-      {on ? "Live" : offline ? "Backend offline" : "Reconnecting"}
-    </span>
-  );
-}
+const MOBILE_TABS: Array<{ view: View; label: string; icon: typeof Activity }> = [
+  { view: "today", label: "Home", icon: Activity },
+  { view: "ideas", label: "Screener", icon: Telescope },
+  { view: "news", label: "News", icon: Newspaper },
+  { view: "portfolio", label: "Portfolio", icon: Briefcase },
+  { view: "chat", label: "AI", icon: MessageSquare },
+];
 
-function Brand({ status, compact = false }: { status?: SystemStatus; compact?: boolean }) {
-  const llm = status ? `AI: ${status.llm.provider} · ${status.llm.model}` : "NEXUS";
+/** Phone navigation, app style: the five most used pages; the rest are in the menu. */
+function MobileTabs() {
+  const { view, go } = useNav();
   return (
-    <div
-      title={llm}
-      className={cn(
-        "grid place-items-center rounded-[14px] border-[1.5px] border-foreground",
-        compact ? "h-10 w-10" : "mb-3 h-12 w-12",
-      )}
+    <nav
+      aria-label="Main"
+      className="fixed inset-x-0 bottom-0 z-30 grid grid-cols-5 border-t border-border bg-background/95 pb-[env(safe-area-inset-bottom)] backdrop-blur lg:hidden"
     >
-      <BarChart3 className="h-5 w-5" aria-label="NEXUS" />
-    </div>
+      {MOBILE_TABS.map(({ view: key, label, icon: Icon }) => (
+        <button
+          key={key}
+          onClick={() => go(key)}
+          aria-current={view === key ? "page" : undefined}
+          className={cn(
+            "flex h-14 flex-col items-center justify-center gap-1 text-[10px] font-medium",
+            view === key ? "text-primary" : "text-muted-foreground",
+          )}
+        >
+          <Icon className="h-5 w-5" />
+          {label}
+        </button>
+      ))}
+    </nav>
   );
 }
 
 function BootstrapBanner({ status }: { status?: SystemStatus }) {
-  const running = status?.jobs.filter((job) => job.running) ?? [];
-  if (status && !status.has_data) {
-    const init = status.jobs.find((job) => job.name === "init");
-    return (
-      <div className="flex items-center gap-2 rounded-xl border border-[#1f3a27] bg-[#0f1a12] px-3 py-2 text-xs">
-        <Loader2 className="h-3 w-3 animate-spin text-bull" />
-        <span>
-          First run: downloading 10 years of history and building event studies (10–20 min).{" "}
-          <span className="text-muted-foreground">
-            {init?.progress ??
-              (init?.last_status === "error" ? "Bootstrap failed — see Settings → jobs." : "")}
-          </span>
+  if (!status || status.has_data) return null;
+  const init = status.jobs.find((job) => job.name === "init");
+  return (
+    <div className="mb-4 flex items-center gap-2 rounded-2xl border border-primary/30 bg-primary-soft px-4 py-3 text-sm">
+      <Loader2 className="h-4 w-4 shrink-0 animate-spin text-primary" />
+      <span>
+        First run: downloading 10 years of history and building event studies (10–20 min).{" "}
+        <span className="text-muted-foreground">
+          {init?.progress ??
+            (init?.last_status === "error" ? "Bootstrap failed — see Settings → jobs." : "")}
         </span>
-      </div>
-    );
-  }
-  if (running.length) {
-    return (
-      <div className="truncate text-xs text-muted-foreground">
-        {running.map((job) => `${job.name}: ${job.progress ?? "running"}`).join(" · ")}
-      </div>
-    );
-  }
-  const news = status?.jobs.find((job) => job.name === "news");
-  return news ? (
-    <div className="text-xs text-muted-foreground">News updated {ago(news.last_finished)}</div>
-  ) : null;
+      </span>
+    </div>
+  );
 }
 
 function Offline() {
   return (
     <div className="terminal-panel mx-auto mt-10 max-w-lg p-6 text-center">
-      <div className="text-base font-bold text-bear">Backend offline</div>
+      <div className="text-base font-semibold text-bear">Backend offline</div>
       <p className="mt-3 text-sm leading-relaxed text-muted-foreground">
         Start the Python server:{" "}
-        <code className="font-mono text-bull">
+        <code className="font-mono text-primary">
           cd server && python -m uvicorn main:app --port 8000
         </code>
-        , or run <code className="font-mono text-bull">.\start-nexus.ps1</code> from the project
+        , or run <code className="font-mono text-primary">.\start-nexus.ps1</code> from the project
         root.
       </p>
     </div>

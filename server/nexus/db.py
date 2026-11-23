@@ -370,6 +370,8 @@ COLUMN_MIGRATIONS = [
     ("event_impact", "q_value REAL"), ("event_impact", "edge_early REAL"), ("event_impact", "edge_late REAL"),
     ("event_impact", "stable INTEGER"), ("event_impact", "reliable INTEGER"),
     ("news", "duplicate_of TEXT"),
+    # Breaking-news wire: when we first saw the headline, and its alert (JSON kinds/level/moves).
+    ("news", "fetched_at TEXT"), ("news", "alert TEXT"),
     ("recommendations", "stated_probability REAL"), ("recommendations", "fact_check TEXT"),
     ("recommendations", "base_probability REAL"), ("replay_calls", "base REAL"),
     # Skills the AI had loaded when it made the call / closed it early, as JSON ["name@version"].

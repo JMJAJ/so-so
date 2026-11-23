@@ -106,6 +106,8 @@ def update_bars(
 # ── Live quotes ──────────────────────────────────────────────────────────────
 
 QUOTE_TTL = 30
+# A daily close older than this (weekends + holidays fit) is too stale to measure "today" against.
+PREV_CLOSE_MAX_GAP_DAYS = 5
 STALE_AFTER = {"crypto": 30 * 60, "forex": 60 * 60, "stock": 60 * 60, "etf": 60 * 60, "commodity": 60 * 60, "index": 60 * 60}
 _quotes: dict[str, dict] = {}
 
@@ -172,11 +174,19 @@ def _fetch_quotes(items: list[Instrument], *, period: str, interval: str, fetche
                 continue
             closes = sub["Close"]
             price = float(closes.iloc[-1])
+            quote_day = pd.Timestamp(closes.index[-1]).date()
             prev_day = db.one(
-                "SELECT close FROM bars WHERE instrument_id=? AND date<? ORDER BY date DESC LIMIT 1",
-                (item.id, pd.Timestamp(closes.index[-1]).date().isoformat()),
+                "SELECT date, close FROM bars WHERE instrument_id=? AND date<? ORDER BY date DESC LIMIT 1",
+                (item.id, quote_day.isoformat()),
             )
-            reference = prev_day["close"] if prev_day else float(closes.iloc[0])
+            if prev_day and (quote_day - date.fromisoformat(prev_day["date"])).days <= PREV_CLOSE_MAX_GAP_DAYS:
+                reference = prev_day["close"]
+            elif prev_day:
+                # Daily bars are behind (the daily job hasn't run): a "change today" against an
+                # old close would be weeks of movement labelled as one day. Report it unknown.
+                reference = None
+            else:
+                reference = float(closes.iloc[0])
             ts = pd.Timestamp(closes.index[-1])
             if ts.tzinfo is None:
                 ts = ts.tz_localize("UTC")

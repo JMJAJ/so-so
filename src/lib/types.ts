@@ -213,6 +213,36 @@ export interface NewsItem {
   historical_analogs: string[];
 }
 
+/** A breaking-news alert from the ~1-minute wire (server/nexus/ingest/wire.py). */
+export interface NewsAlert {
+  id: string;
+  published_at: string;
+  fetched_at: string | null;
+  title: string;
+  url: string | null;
+  source: string | null;
+  tickers: string[];
+  kinds: string[];
+  /** 3 = leadership, M&A, central bank; 2 = guidance, regulators, big moves; 1 = watch. */
+  level: number;
+  /** How far each tagged asset had already moved when the alert fired. */
+  moves?: Record<string, { price: number | null; change_pct: number | null }>;
+  /** Other outlets that carried the same story afterwards. */
+  follow_ups?: number;
+  category?: string | null;
+  direction?: number | null;
+}
+
+export interface WireSource {
+  name: string;
+  group: string;
+  every: number;
+  last: string | null;
+  error: string | null;
+  failures: number;
+  new: number | null;
+}
+
 export interface Position {
   id: string;
   instrument_id: string;

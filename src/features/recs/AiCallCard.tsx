@@ -95,7 +95,7 @@ export function AiCallCard({ rec, symbol }: { rec: Recommendation | undefined; s
           </span>
         ) : (
           <button
-            className="min-h-11 flex-1 rounded-xl bg-white text-sm font-bold text-[#134222] disabled:opacity-60"
+            className="min-h-11 flex-1 rounded-xl bg-white text-sm font-bold text-primary-strong disabled:opacity-60"
             disabled={trade.isPending}
             onClick={() => trade.mutate()}
           >
@@ -158,12 +158,12 @@ export function EvidenceSteps({ rec }: { rec: Recommendation }) {
               <span
                 className={cn(
                   "grid h-[34px] w-[34px] place-items-center rounded-[10px] border bg-raised text-[13px] font-bold",
-                  step.off ? "border-[#3a2220] text-bear" : "border-[#1f3a27] text-bull",
+                  step.off ? "border-bear-line text-bear" : "border-bull-line text-bull",
                 )}
               >
                 {step.title.charAt(0)}
               </span>
-              {index < steps.length - 1 && <span className="min-h-4 w-px flex-1 bg-[#24372a]" />}
+              {index < steps.length - 1 && <span className="min-h-4 w-px flex-1 bg-bull-line" />}
             </div>
             <div className="flex flex-col gap-0.5 pb-4">
               <span className="text-sm font-semibold">{step.title}</span>

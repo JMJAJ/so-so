@@ -12,6 +12,7 @@ import type { ReactNode } from "react";
 
 import appCss from "../styles.css?url";
 import { Toaster } from "@/components/ui/sonner";
+import { THEME_BOOT_SCRIPT, useTheme } from "@/lib/theme";
 
 function NotFoundComponent() {
   return (
@@ -71,7 +72,7 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
         content:
           "AI investment research grounded in market and news history, verified with paper trading.",
       },
-      { name: "theme-color", content: "#0a0a0a" },
+      { name: "theme-color", content: "#09090b" },
       { property: "og:title", content: "NEXUS // Evidence-based investment research" },
       {
         property: "og:description",
@@ -93,6 +94,7 @@ function RootShell({ children }: { children: ReactNode }) {
   return (
     <html lang="en" className="dark">
       <head>
+        <script dangerouslySetInnerHTML={{ __html: THEME_BOOT_SCRIPT }} />
         <HeadContent />
       </head>
       <body>
@@ -109,7 +111,12 @@ function RootComponent() {
   return (
     <QueryClientProvider client={queryClient}>
       <Outlet />
-      <Toaster theme="dark" />
+      <ThemedToaster />
     </QueryClientProvider>
   );
+}
+
+function ThemedToaster() {
+  const { theme } = useTheme();
+  return <Toaster theme={theme} position="bottom-right" closeButton />;
 }

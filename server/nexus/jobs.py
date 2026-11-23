@@ -9,7 +9,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Callable
 
 from . import config, data, db, live, nlp, paper, recommendations, snapshot, universe
-from .ingest import events, gdelt, macro, news, prices
+from .ingest import events, gdelt, macro, news, prices, wire
 from .research import backtest, event_study, replay, scan, simulate
 
 _running: set[str] = set()
@@ -28,8 +28,26 @@ def _focus_ids() -> list[str]:
     return sorted(ids)
 
 
+_focus_cache: dict = {"at": 0.0, "ids": []}
+
+
+def _focus_ids_cached() -> list[str]:
+    """Focus list for the wire, recomputed at most every 10 minutes (ranking is not free)."""
+    if time.time() - _focus_cache["at"] > 600:
+        try:
+            _focus_cache.update(at=time.time(), ids=_focus_ids())
+        except Exception:
+            _focus_cache["at"] = time.time()
+    return _focus_cache["ids"]
+
+
 def job_monitor(progress) -> dict:
     return {"paper": paper.monitor()}
+
+
+def job_wire(progress) -> dict:
+    progress("polling every wire feed")
+    return wire.poll(_focus_ids(), force=True)
 
 
 def job_news(progress) -> dict:
@@ -138,6 +156,7 @@ JOBS: dict[str, tuple[Callable, str]] = {
     "init": (job_init, "Full bootstrap: 10y prices, macro, events, event studies, backtest, replay"),
     "daily": (job_daily, "Daily bars, macro, events, score recommendations, forecasts"),
     "news": (job_news, "Fetch and classify headlines"),
+    "wire": (job_wire, "Poll every breaking-news feed now (it also runs by itself about once a minute)"),
     "monitor": (job_monitor, "Fill pending orders, enforce stops/targets/expiry"),
     "research": (job_research, "Earnings history, event studies, walk-forward backtest, point-in-time replay"),
     "analyst": (job_analyst, "AI research run that writes recommendations"),
@@ -173,7 +192,7 @@ def run(name: str, progress: Callable[[str], None] | None = None) -> dict:
         db.execute("UPDATE jobs SET last_finished=?, last_status='ok', last_error=NULL, last_summary=?, duration_ms=? WHERE name=?",
                    (db.now_iso(), db.dumps(result)[:4000], int((time.time() - started) * 1000), name))
         live.publish("job", name=name, status="ok")
-        if name != "monitor":
+        if name not in ("monitor", "wire"):
             snapshot.push_async(f"after {name}")
         return result
     except Exception as exc:
@@ -253,7 +272,8 @@ def start_scheduler() -> None:
     scheduler = BackgroundScheduler(timezone="UTC", job_defaults={"coalesce": True, "max_instances": 1, "misfire_grace_time": 3600})
     soon = datetime.now(timezone.utc) + timedelta(seconds=90)
     scheduler.add_job(safe("monitor"), IntervalTrigger(minutes=5), id="monitor", next_run_time=soon)
-    scheduler.add_job(safe("news"), IntervalTrigger(minutes=30), id="news", next_run_time=soon)
+    scheduler.add_job(safe("news"), IntervalTrigger(minutes=max(2, config.get_int("news_interval_min"))), id="news",
+                      next_run_time=soon)
     scheduler.add_job(safe("daily"), CronTrigger(hour=21, minute=45, timezone="UTC"), id="daily")
     scheduler.add_job(safe("analyst"), CronTrigger(hour=22, minute=30, timezone="UTC"), id="analyst")
     scheduler.add_job(safe("research"), CronTrigger(day_of_week="sat", hour=6, timezone="UTC"), id="research")
@@ -261,10 +281,12 @@ def start_scheduler() -> None:
                       next_run_time=soon + timedelta(minutes=10))
     scheduler.start()
     _scheduler = scheduler
+    wire.start(_focus_ids_cached)
 
 
 def stop_scheduler() -> None:
     global _scheduler
+    wire.stop()
     if _scheduler:
         _scheduler.shutdown(wait=False)
         _scheduler = None
