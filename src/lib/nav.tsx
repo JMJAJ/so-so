@@ -59,7 +59,7 @@ export function NavProvider({ children }: { children: ReactNode }) {
     const search = new URLSearchParams({ v: view, ...params });
     window.history.pushState(null, "", `/?${search}`);
     setState({ view, params });
-    window.scrollTo({ top: 0 });
+    document.getElementById("main")?.scrollTo({ top: 0 });
   }, []);
 
   const openAsset = useCallback((instrumentId: string) => go("asset", { id: instrumentId }), [go]);

@@ -97,6 +97,20 @@ def recent_news(instrument: str | None = None, days: int = 7, category: str | No
                                               "affected", "rationale", "historical_analogs")} for row in rows]}
 
 
+def breaking_news(minutes: int = 240, instrument: str | None = None, min_level: int = 1) -> dict:
+    from ..ingest import wire
+
+    item = _inst(instrument) if instrument else None
+    rows = wire.recent_alerts(minutes=min(int(minutes), 7 * 24 * 60), min_level=int(min_level), limit=80)
+    if item:
+        rows = [r for r in rows if item.id in r["tickers"]]
+    return {"note": "Alerts are headlines matching high-impact patterns, minutes old. The 'moves' field is how far "
+                    "the asset had already moved when the alert fired. An alert is not evidence of a further move; "
+                    "check event_study / simulate before acting.",
+            "rows": [{k: r.get(k) for k in ("published_at", "fetched_at", "title", "source", "tickers", "kinds", "level",
+                                            "moves", "category", "direction")} for r in rows[:40]]}
+
+
 def event_study_tool(event_type: str, instrument: str) -> dict:
     item = _inst(instrument)
     if event_type not in EVENT_TYPES:
@@ -363,6 +377,14 @@ TOOLS: dict[str, dict] = {
             "category": {"type": "string", "enum": list(NEWS_CATEGORIES)},
             "min_magnitude": {"type": "integer", "minimum": 1, "maximum": 3},
             "limit": {"type": "integer", "minimum": 1, "maximum": 60}}},
+    },
+    "breaking_news": {
+        "fn": breaking_news,
+        "description": "Breaking-news alerts from the ~1-minute wire (CEO changes, M&A, guidance, regulators, central banks, wars), "
+                       "with how far each tagged asset had already moved. Use first when asked what is happening right now.",
+        "parameters": {"type": "object", "properties": {
+            "minutes": {"type": "integer", "minimum": 5, "maximum": 10080}, "instrument": _INSTR,
+            "min_level": {"type": "integer", "minimum": 1, "maximum": 3}}},
     },
     "event_study": {
         "fn": event_study_tool,

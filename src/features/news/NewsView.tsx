@@ -1,6 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
 
+import { AlertRow } from "@/features/shell/RightRail";
 import { HeadlinesPanel } from "@/features/today/TodayView";
 import {
   Badge,
@@ -10,6 +11,7 @@ import {
   Loading,
   PageHeading,
   Panel,
+  Segmented,
   Td,
   Th,
   TableWrap,
@@ -19,33 +21,122 @@ import { humanize, pct, shortDate, tone } from "@/lib/format";
 import { useNav } from "@/lib/nav";
 import { cn } from "@/lib/utils";
 
-type Tab = "headlines" | "events" | "library";
+type Tab = "wire" | "headlines" | "events" | "library";
+
+const TABS: Array<{ value: Tab; label: string }> = [
+  { value: "wire", label: "Live wire" },
+  { value: "headlines", label: "Headlines" },
+  { value: "events", label: "Detected events" },
+  { value: "library", label: "Event library" },
+];
 
 export default function NewsView() {
-  const [tab, setTab] = useState<Tab>("headlines");
+  const [tab, setTab] = useState<Tab>("wire");
   return (
     <div className="space-y-4">
       <PageHeading
         title="News & events"
         subtitle="Headlines are classified into event categories. Structured events (earnings surprises, Fed moves, macro surprises, market shocks, geopolitical spikes) carry years of history, so the system can measure what each kind of event did to every asset."
       />
-      <div className="flex gap-2">
-        {(["headlines", "events", "library"] as Tab[]).map((value) => (
-          <button
-            key={value}
-            className={cn(
-              "secondary-button",
-              tab === value && "!border-[#2f352f] !bg-accent !text-foreground",
-            )}
-            onClick={() => setTab(value)}
-          >
-            {value === "library" ? "event library" : value === "events" ? "detected events" : value}
-          </button>
-        ))}
-      </div>
+      <Segmented
+        value={tab}
+        options={TABS}
+        onChange={setTab}
+        className="max-w-full overflow-x-auto"
+      />
+      {tab === "wire" && <LiveWireTab />}
       {tab === "headlines" && <Headlines />}
       {tab === "events" && <DetectedEvents />}
       {tab === "library" && <EventLibrary />}
+    </div>
+  );
+}
+
+function LiveWireTab() {
+  const [level, setLevel] = useState(2);
+  const [hours, setHours] = useState(24);
+  const alerts = useQuery({
+    queryKey: ["alerts", "page", level, hours],
+    queryFn: () => api.newsAlerts({ minutes: hours * 60, min_level: level, limit: 200 }),
+    refetchInterval: 60_000,
+  });
+  const sources = useQuery({
+    queryKey: ["alerts", "sources"],
+    queryFn: api.newsSources,
+    refetchInterval: 60_000,
+  });
+  const healthy = (sources.data ?? []).filter((s) => !s.error && s.last).length;
+  return (
+    <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_320px]">
+      <Panel
+        title="Breaking news"
+        subtitle="High-impact headlines (CEO changes, deals, guidance, regulators, central banks, wars) within about a minute of publication, one row per story. The coloured figure on each symbol is how far it had already moved when the alert fired: by the time free feeds carry a story, much of the move is usually priced in."
+        actions={
+          <>
+            <Segmented
+              value={level}
+              onChange={setLevel}
+              options={[
+                { value: 3, label: "Top" },
+                { value: 2, label: "Major" },
+                { value: 1, label: "All" },
+              ]}
+            />
+            <select
+              className="terminal-select !w-auto"
+              value={hours}
+              onChange={(e) => setHours(Number(e.target.value))}
+            >
+              {[1, 6, 24, 72, 168].map((h) => (
+                <option key={h} value={h}>
+                  Last {h < 24 ? `${h}h` : `${h / 24}d`}
+                </option>
+              ))}
+            </select>
+          </>
+        }
+      >
+        {alerts.isLoading && <Loading />}
+        {alerts.error && <ErrorNote error={alerts.error} />}
+        {alerts.data?.length === 0 && (
+          <Empty title="No alerts in this window">
+            The wire polls about 50 sources roughly every minute. Lower the level or widen the
+            window.
+          </Empty>
+        )}
+        <div className="-mt-2">
+          {alerts.data?.map((alert) => (
+            <AlertRow key={alert.id} alert={alert} wide />
+          ))}
+        </div>
+      </Panel>
+      <Panel
+        title="Sources"
+        subtitle={
+          sources.data
+            ? `${healthy} of ${sources.data.length} feeds healthy. Failing feeds back off and retry by themselves.`
+            : undefined
+        }
+      >
+        <ul className="-my-1 max-h-[640px] space-y-0.5 overflow-y-auto text-xs">
+          {(sources.data ?? []).map((source) => (
+            <li
+              key={source.name}
+              className="flex items-center gap-2 py-1"
+              title={source.error ?? `every ${source.every}s`}
+            >
+              <span
+                className={cn(
+                  "h-1.5 w-1.5 shrink-0 rounded-full",
+                  source.error ? "bg-bear" : source.last ? "bg-bull" : "bg-muted-foreground",
+                )}
+              />
+              <span className="min-w-0 flex-1 truncate">{source.name}</span>
+              <span className="text-muted-foreground">{source.group}</span>
+            </li>
+          ))}
+        </ul>
+      </Panel>
     </div>
   );
 }

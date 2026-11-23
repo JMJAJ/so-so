@@ -1,5 +1,8 @@
 import { useQueryClient, type QueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
+import { toast } from "sonner";
+
+import type { NewsAlert } from "./types";
 
 /** A change notification from /api/live (see server/nexus/live.py). */
 interface LiveEvent {
@@ -8,14 +11,16 @@ interface LiveEvent {
   at?: string;
   name?: string;
   status?: string;
+  alert?: NewsAlert;
 }
 
 /** Which cached queries each kind of change makes stale (by query-key prefix). */
 const TOPIC_KEYS: Record<string, string[]> = {
-  quotes: ["portfolio", "dashboard", "asset", "intraday", "universe", "briefs"],
+  quotes: ["portfolio", "dashboard", "asset", "intraday", "universe", "briefs", "quotes"],
   portfolio: ["portfolio", "dashboard", "status", "track-record", "accounts", "portfolio-sim"],
   recommendations: ["dashboard", "portfolio", "track-record", "briefs", "skills", "simulate"],
   news: ["news", "events", "dashboard", "status"],
+  alert: ["alerts", "news"],
   settings: ["settings", "status"],
   logs: ["logs"],
   progress: ["status", "jobs"],
@@ -35,6 +40,43 @@ const JOB_KEYS: Record<string, string[]> = {
 };
 
 const DEBOUNCE_MS = 400;
+const TOAST_WINDOW_MS = 30_000;
+const TOASTS_PER_WINDOW = 3;
+const recentToasts: number[] = [];
+
+function watched(): string[] {
+  try {
+    return JSON.parse(window.localStorage.getItem("nexus.watchlist") ?? "[]") as string[];
+  } catch {
+    return [];
+  }
+}
+
+/** Interrupt only for what matters: top-level stories, or level-2 news on a watched asset.
+ * At most a few per half minute, so a busy news hour doesn't bury the screen. */
+function announce(alert: NewsAlert): void {
+  const mine = watched();
+  const relevant =
+    alert.level >= 3 || (alert.level >= 2 && alert.tickers.some((t) => mine.includes(t)));
+  if (!relevant) return;
+  const now = Date.now();
+  while (recentToasts.length && now - recentToasts[0] > TOAST_WINDOW_MS) recentToasts.shift();
+  if (recentToasts.length >= TOASTS_PER_WINDOW) return;
+  recentToasts.push(now);
+  const moves = Object.entries(alert.moves ?? {})
+    .filter(([, m]) => m.change_pct != null)
+    .map(
+      ([id, m]) =>
+        `${id.split(":")[1]?.toUpperCase()} ${m.change_pct! >= 0 ? "+" : ""}${m.change_pct!.toFixed(1)}% today`,
+    );
+  toast(alert.title, {
+    description: [alert.source, ...moves].filter(Boolean).join(" · "),
+    duration: 12_000,
+    action: alert.url
+      ? { label: "Read", onClick: () => window.open(alert.url!, "_blank", "noopener") }
+      : undefined,
+  });
+}
 
 function keysFor(event: LiveEvent): string[] {
   if (event.topic === "job") {
@@ -82,6 +124,7 @@ export function useLiveUpdates(): LiveState {
     source.onmessage = (message) => {
       const event = JSON.parse(message.data as string) as LiveEvent;
       if (event.topic === "hello") return;
+      if (event.topic === "alert" && event.alert) announce(event.alert);
       setState({ connected: true, lastEventAt: Date.now() });
       invalidate(keysFor(event));
     };

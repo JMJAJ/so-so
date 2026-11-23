@@ -111,7 +111,7 @@ export function ChatPanel({ wide = false }: { wide?: boolean }) {
             </button>
           ) : (
             <button
-              className="icon-button !border-[#1f3a27] !text-bull"
+              className="icon-button !border-bull-line !text-bull"
               aria-label="Send"
               disabled={!input.trim()}
             >
@@ -127,7 +127,7 @@ export function ChatPanel({ wide = false }: { wide?: boolean }) {
                   type="button"
                   key={command}
                   title={help}
-                  className="rounded-lg border border-border px-1.5 py-0.5 text-xs hover:border-[#2f352f]"
+                  className="rounded-lg border border-border px-1.5 py-0.5 text-xs hover:border-strong"
                   onClick={() => setInput(command.split(" ")[0] + " ")}
                 >
                   {command.split(" ")[0]}
@@ -153,7 +153,7 @@ function Welcome({ wide, onPick }: { wide: boolean; onPick: (command: string) =>
         {COMMANDS.map(([command, help]) => (
           <button
             key={command}
-            className="rounded-lg flex items-center justify-between gap-3 border border-border px-2.5 py-1.5 text-left text-[11px] hover:border-[#2f352f]"
+            className="rounded-lg flex items-center justify-between gap-3 border border-border px-2.5 py-1.5 text-left text-[11px] hover:border-strong"
             onClick={() => onPick(command.includes(" ") ? command : command + " ")}
           >
             <span className="shrink-0 font-bold text-foreground">{command}</span>

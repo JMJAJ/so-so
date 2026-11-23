@@ -44,42 +44,8 @@ export default function TodayView() {
         title="Today"
         subtitle="What the evidence says right now: market regime, the AI's open calls and how they're doing, and the events that historically move markets."
       />
+      <BalanceHero data={data} />
       <RegimeStrip data={data} />
-      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-        <div className="terminal-panel p-3">
-          <Stat
-            label="Paper equity"
-            value={money(data.portfolio.equity)}
-            hint={pct(data.portfolio.return_pct / 100, 2) + " since start"}
-            valueClassName={tone(data.portfolio.return_pct)}
-          />
-        </div>
-        <div className="terminal-panel p-3">
-          <Stat
-            label="Open positions"
-            value={data.portfolio.open_count}
-            hint={`${data.portfolio.pending_count} pending · ${num(data.portfolio.exposure_pct, 0)}% exposure`}
-          />
-        </div>
-        <div className="terminal-panel p-3">
-          <Stat
-            label="AI hit rate"
-            value={data.track.n ? pct(data.track.hit_rate ?? null, 0, false) : "—"}
-            hint={
-              data.track.n
-                ? `${data.track.n} closed calls · avg ${pct(data.track.avg_return ?? null)}`
-                : "No closed calls yet"
-            }
-          />
-        </div>
-        <div className="terminal-panel p-3">
-          <Stat
-            label="Calibration (Brier)"
-            value={data.track.n ? num(data.track.brier ?? null, 3) : "—"}
-            hint="0.25 = coin flip · lower is better"
-          />
-        </div>
-      </div>
 
       <div className="grid gap-4 xl:grid-cols-[minmax(0,1.25fr)_minmax(0,1fr)]">
         <div className="min-w-0 space-y-4">
@@ -108,6 +74,100 @@ export default function TodayView() {
         </div>
       </div>
     </div>
+  );
+}
+
+/** Revolut-style balance header: one big number, what changed, and the equity curve. */
+function BalanceHero({ data }: { data: Dashboard }) {
+  const portfolio = useQuery({ queryKey: ["portfolio"], queryFn: api.portfolio });
+  const curve = (portfolio.data?.equity_curve ?? []).map((point) => point.equity);
+  const p = data.portfolio;
+  const facts: Array<{ label: string; value: string; hint: string; className?: string }> = [
+    {
+      label: "Open P&L",
+      value: money(p.unrealized, true),
+      hint: `${p.open_count} open · ${p.pending_count} pending`,
+      className: tone(p.unrealized),
+    },
+    {
+      label: "Realised",
+      value: money(p.realized, true),
+      hint: `${num(p.exposure_pct, 0)}% of equity exposed`,
+      className: tone(p.realized),
+    },
+    {
+      label: "AI hit rate",
+      value: data.track.n ? pct(data.track.hit_rate ?? null, 0, false) : "—",
+      hint: data.track.n ? `${data.track.n} closed calls` : "No closed calls yet",
+    },
+    {
+      label: "Calibration",
+      value: data.track.n ? num(data.track.brier ?? null, 3) : "—",
+      hint: "Brier · 0.25 = coin flip",
+    },
+  ];
+  return (
+    <section className="terminal-panel overflow-hidden">
+      <div className="flex flex-wrap items-end justify-between gap-6 px-6 pt-6">
+        <div className="min-w-0">
+          <div className="text-sm text-muted-foreground">Paper balance</div>
+          <div className="mt-1 font-mono text-[40px] font-semibold leading-none tracking-tight sm:text-[48px]">
+            {money(p.equity)}
+          </div>
+          <div className={cn("mt-2 text-sm font-medium", tone(p.return_pct))}>
+            {pct(p.return_pct / 100, 2)} all time
+          </div>
+        </div>
+        <div className="grid w-full grid-cols-2 gap-x-8 gap-y-4 sm:w-auto sm:grid-cols-4">
+          {facts.map((fact) => (
+            <div key={fact.label} className="min-w-0">
+              <div className="text-xs text-muted-foreground">{fact.label}</div>
+              <div className={cn("mt-0.5 font-mono text-base font-semibold", fact.className)}>
+                {fact.value}
+              </div>
+              <div className="truncate text-[11px] text-muted-foreground">{fact.hint}</div>
+            </div>
+          ))}
+        </div>
+      </div>
+      <EquityArea values={curve} up={(p.return_pct ?? 0) >= 0} />
+    </section>
+  );
+}
+
+function EquityArea({ values, up }: { values: number[]; up: boolean }) {
+  if (values.length < 2) return <div className="h-6" />;
+  const width = 1000;
+  const height = 110;
+  // At least 1% of equity tall, so a flat account looks flat instead of a cliff.
+  const mid = (Math.min(...values) + Math.max(...values)) / 2;
+  const span = Math.max(Math.max(...values) - Math.min(...values), Math.abs(mid) * 0.01, 1e-9);
+  const lo = mid - span / 2;
+  const points = values.map((v, i) => [
+    (i / (values.length - 1)) * width,
+    height - 6 - ((v - lo) / span) * (height - 18),
+  ]);
+  const line = points
+    .map(([x, y], i) => `${i ? "L" : "M"}${x.toFixed(1)},${y.toFixed(1)}`)
+    .join("");
+  const color = up ? "var(--color-bull)" : "var(--color-bear)";
+  return (
+    <svg
+      viewBox={`0 0 ${width} ${height}`}
+      preserveAspectRatio="none"
+      className="mt-4 block h-[110px] w-full"
+      role="img"
+      aria-label="Paper equity over time"
+    >
+      <defs>
+        <linearGradient id="equity-fill" x1="0" x2="0" y1="0" y2="1">
+          <stop offset="0%" stopColor={color} stopOpacity="0.22" />
+          <stop offset="100%" stopColor={color} stopOpacity="0" />
+        </linearGradient>
+      </defs>
+      <path d={`${line}L${width},${height}L0,${height}Z`} fill="url(#equity-fill)" />
+      <path d={line} fill="none" stroke={color} strokeWidth="2" vectorEffect="non-scaling-stroke" />
+    </svg>
   );
 }
 
@@ -361,7 +421,7 @@ function EventsPanel({ events }: { events: MarketEvent[] }) {
                     <button
                       key={asset.instrument_id}
                       onClick={() => openAsset(asset.instrument_id)}
-                      className="rounded-lg border border-border px-1.5 py-0.5 text-xs hover:border-[#2f352f]"
+                      className="rounded-lg border border-border px-1.5 py-0.5 text-xs hover:border-strong"
                       title={`edge ${pct(asset.edge)} · t=${asset.t_stat.toFixed(1)} · n=${asset.n}`}
                     >
                       {asset.symbol} <span className={tone(asset.edge)}>{pct(asset.edge, 1)}</span>
@@ -423,7 +483,7 @@ export function HeadlinesPanel({
                   {item.affected.map((id) => (
                     <button
                       key={id}
-                      className="rounded-lg border border-border px-1 hover:border-[#2f352f]"
+                      className="rounded-lg border border-border px-1 hover:border-strong"
                       onClick={() => openAsset(id)}
                     >
                       {id.split(":")[1]?.toUpperCase()}

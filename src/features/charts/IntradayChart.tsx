@@ -11,19 +11,13 @@ import {
 } from "lightweight-charts";
 import { useEffect, useRef } from "react";
 
+import { useTheme } from "@/lib/theme";
+
+import { chartPalette } from "./palette";
+
 import { Empty, Loading } from "@/features/shell/ui";
 import { api } from "@/lib/api";
 import type { IntradaySpan, Recommendation } from "@/lib/types";
-
-const COLORS = {
-  bg: "#0e100e",
-  text: "#7d847d",
-  grid: "#171a17",
-  up: "#34b357",
-  down: "#e5534b",
-  amber: "#e7e9e7",
-  muted: "#6f756f",
-};
 
 /** lightweight-charts draws UTC; shift so the axis reads in the viewer's local time. */
 const local = (t: number) => (t - new Date(t * 1000).getTimezoneOffset() * 60) as UTCTimestamp;
@@ -44,6 +38,7 @@ export default function IntradayChart({
   height?: number;
 }) {
   const host = useRef<HTMLDivElement>(null);
+  const { theme } = useTheme();
   const chart = useRef<IChartApi | null>(null);
   const candles = useRef<ISeriesApi<"Candlestick"> | null>(null);
   const volume = useRef<ISeriesApi<"Histogram"> | null>(null);
@@ -61,6 +56,7 @@ export default function IntradayChart({
 
   useEffect(() => {
     if (!host.current || !hasBars) return;
+    const COLORS = chartPalette();
     const instance = createChart(host.current, {
       height,
       autoSize: true,
@@ -71,8 +67,8 @@ export default function IntradayChart({
         fontSize: 10,
       },
       grid: { vertLines: { color: COLORS.grid }, horzLines: { color: COLORS.grid } },
-      rightPriceScale: { borderColor: "#1f231f" },
-      timeScale: { borderColor: "#1f231f", timeVisible: true, secondsVisible: false },
+      rightPriceScale: { borderColor: COLORS.border },
+      timeScale: { borderColor: COLORS.border, timeVisible: true, secondsVisible: false },
       crosshair: { mode: 0 },
     });
     candles.current = instance.addSeries(CandlestickSeries, {
@@ -86,7 +82,7 @@ export default function IntradayChart({
     volume.current = instance.addSeries(HistogramSeries, {
       priceScaleId: "vol",
       priceFormat: { type: "volume" },
-      color: "#1d211d",
+      color: COLORS.volume,
     });
     instance.priceScale("vol").applyOptions({ scaleMargins: { top: 0.85, bottom: 0 } });
     if (entry != null && stop != null && target != null) {
@@ -109,10 +105,11 @@ export default function IntradayChart({
       instance.remove();
       chart.current = candles.current = volume.current = null;
     };
-  }, [hasBars, instrumentId, span, entry, stop, target, height]);
+  }, [hasBars, instrumentId, span, entry, stop, target, height, theme]);
 
   useEffect(() => {
     if (!bars?.length || !candles.current || !volume.current) return;
+    const COLORS = chartPalette();
     const rows = bars.filter((bar) => bar.c != null);
     candles.current.setData(
       rows.map((bar) => ({
@@ -127,14 +124,14 @@ export default function IntradayChart({
       rows.map((bar) => ({
         time: local(bar.t),
         value: bar.v ?? 0,
-        color: (bar.c ?? 0) >= (bar.o ?? 0) ? "#17331f" : "#3a1c1a",
+        color: (bar.c ?? 0) >= (bar.o ?? 0) ? COLORS.upSoft : COLORS.downSoft,
       })),
     );
     if (!fitted.current) {
       chart.current?.timeScale().fitContent();
       fitted.current = true;
     }
-  }, [bars]);
+  }, [bars, theme]);
 
   if (query.isLoading) return <Loading />;
   if (!hasBars) return <Empty title="No intraday data for this market right now" />;

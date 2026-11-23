@@ -102,7 +102,7 @@ export default function TrackRecordView() {
               key={key}
               className={cn(
                 "secondary-button !px-2 !py-1",
-                group === key && "!border-[#2f352f] !bg-accent !text-foreground",
+                group === key && "!border-strong !bg-accent !text-foreground",
               )}
               onClick={() => setGroup(key)}
             >

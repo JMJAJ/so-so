@@ -10,17 +10,11 @@ import {
 } from "lightweight-charts";
 import { useEffect, useRef } from "react";
 
-import type { AssetDetail, Recommendation } from "@/lib/types";
+import { useTheme } from "@/lib/theme";
 
-const COLORS = {
-  bg: "#0e100e",
-  text: "#7d847d",
-  grid: "#171a17",
-  up: "#34b357",
-  down: "#e5534b",
-  amber: "#e7e9e7",
-  muted: "#6f756f",
-};
+import { chartPalette } from "./palette";
+
+import type { AssetDetail, Recommendation } from "@/lib/types";
 
 export default function CandleChart({
   bars,
@@ -36,9 +30,11 @@ export default function CandleChart({
   height?: number;
 }) {
   const host = useRef<HTMLDivElement>(null);
+  const { theme } = useTheme();
 
   useEffect(() => {
     if (!host.current || bars.length === 0) return;
+    const COLORS = chartPalette();
     const chart = createChart(host.current, {
       height,
       autoSize: true,
@@ -49,8 +45,8 @@ export default function CandleChart({
         fontSize: 10,
       },
       grid: { vertLines: { color: COLORS.grid }, horzLines: { color: COLORS.grid } },
-      rightPriceScale: { borderColor: "#1f231f" },
-      timeScale: { borderColor: "#1f231f" },
+      rightPriceScale: { borderColor: COLORS.border },
+      timeScale: { borderColor: COLORS.border },
       crosshair: { mode: 0 },
     });
     const candles = chart.addSeries(CandlestickSeries, {
@@ -75,7 +71,7 @@ export default function CandleChart({
       const volume = chart.addSeries(HistogramSeries, {
         priceScaleId: "vol",
         priceFormat: { type: "volume" },
-        color: "#1d211d",
+        color: COLORS.volume,
       });
       chart.priceScale("vol").applyOptions({ scaleMargins: { top: 0.85, bottom: 0 } });
       volume.setData(rows.map((bar) => ({ time: bar.t as Time, value: bar.v ?? 0 })));
@@ -138,7 +134,7 @@ export default function CandleChart({
     }
     chart.timeScale().fitContent();
     return () => chart.remove();
-  }, [bars, events, recommendations, showMacro, height]);
+  }, [bars, events, recommendations, showMacro, height, theme]);
 
   return <div ref={host} className="w-full" style={{ height }} />;
 }

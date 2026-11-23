@@ -14,7 +14,7 @@ export default function ChatView() {
   const conversations = useQuery({ queryKey: ["conversations"], queryFn: api.conversations });
 
   return (
-    <div className="terminal-panel -my-1 flex h-[calc(100vh-7rem)] min-h-[480px]">
+    <div className="terminal-panel -my-1 flex h-[calc(100dvh-9.5rem)] min-h-[480px]">
       <aside className="hidden w-60 shrink-0 flex-col border-r border-border lg:flex">
         <div className="border-b border-border px-3 py-2.5 text-xs font-bold text-foreground">
           Conversations

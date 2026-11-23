@@ -88,7 +88,7 @@ export default function MarketsView() {
             key={label}
             className={cn(
               "secondary-button !px-2 !py-1",
-              offset === value && "!border-[#2f352f] !bg-accent !text-foreground",
+              offset === value && "!border-strong !bg-accent !text-foreground",
             )}
             onClick={() => setOffset(value as number)}
           >

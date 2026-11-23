@@ -83,7 +83,7 @@ export default function IdeasView() {
             onClick={() => setAssetClass(value)}
             className={cn(
               "secondary-button",
-              assetClass === value && "!border-[#2f352f] !bg-accent !text-foreground",
+              assetClass === value && "!border-strong !bg-accent !text-foreground",
             )}
           >
             {value}

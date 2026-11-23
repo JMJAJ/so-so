@@ -23,6 +23,7 @@ The frontend is TanStack Start (React 19). The backend is a Python FastAPI packa
 | `server/nexus/universe.py` | ~150 instruments, ids like `stock:aapl`, `etf:spy`, `crypto:btc`, `forex:eurusd`, `commodity:gold`, `index:vix` |
 | `server/nexus/taxonomy.py` | Event types (with history) and news categories, plus how each category maps to them |
 | `server/nexus/ingest/*` | prices/quotes, FRED macro, event detection, GDELT, headlines |
+| `server/nexus/ingest/wire.py` | Breaking-news wire: ~50 feeds polled about every minute (conditional GET, backoff), instrument tagging, alerts grouped per story, `alert` live events |
 | `server/nexus/research/features.py` | Point-in-time technicals and market regime |
 | `server/nexus/research/event_study.py` | Per (event type × asset) beta-adjusted forward returns, edge, t-stat, BH q-value, split-half stability, `reliable` flag |
 | `server/nexus/research/probability.py` | Trade probability and expected value from a bracket simulation, reliable evidence and calibration |
@@ -69,11 +70,15 @@ npm run typecheck && npm run lint                # frontend checks
 - **Skills are process, not beliefs.** A skill says how to check something with the tools, never
   "X tends to go up after Y" unless it is generated from reliable event studies. Bump `version` when
   a skill's meaning changes so the track record compares versions separately.
-- **Styling (Dark Pro)**: Tailwind v4 with the tokens in `src/styles.css`: near-black panels
-  (`terminal-panel`, rounded 20px, thin border), one flat green accent (`primary`; `bull`/`bear`
-  for gains and losses), no glow or shadows. Quicksand for text in sentence case, `font-mono`
-  (JetBrains Mono) for prices and figures. The open AI call is the one `accent-card` (green) per
-  screen (`features/recs/AiCallCard.tsx`). Use the primitives in `src/features/shell/ui.tsx`.
+- **Styling (Workspace)**: Tailwind v4 with the tokens in `src/styles.css`: neutral surfaces
+  (`terminal-panel`, rounded 18px, thin border), one blue `primary`, `bull`/`bear` only for gains and
+  losses, soft/line variants (`bg-bull-soft`, `border-bear-line`, `border-strong`, `border-row-line`).
+  Never hard-code hex colours in views: dark is default and `html.light` switches every token
+  (`src/lib/theme.ts`); canvas charts read tokens through `features/charts/palette.ts`. Inter for
+  text in sentence case, `font-mono` (JetBrains Mono) for prices and figures, pill buttons,
+  `Segmented` for tabs/ranges. The open AI call is the one `accent-card` per screen
+  (`features/recs/AiCallCard.tsx`). Layout: `shell/Sidebar`, `shell/TopBar` (Ctrl K search, ticker
+  tape), `shell/RightRail` (watchlist + live wire), bottom tabs on phones. Use `src/features/shell/ui.tsx`.
 - **Data fetching**: React Query hooks calling `api.*` from `src/lib/api.ts`. Navigation is
   `useNav()` (`?v=view&id=…` in the URL).
 - **Asset classes**: `stock | etf | crypto | forex | commodity | index`; `index` is research-only.

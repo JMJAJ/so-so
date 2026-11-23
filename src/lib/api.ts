@@ -1,4 +1,6 @@
 import type {
+  NewsAlert,
+  WireSource,
   AssetDetail,
   AssetSimulation,
   Brief,
@@ -77,6 +79,10 @@ export const api = {
     fetchJson<{ ok: boolean }>("/auth/login", send("POST", { password })),
   dashboard: () => fetchJson<Dashboard>("/dashboard"),
   universe: () => fetchJson<Instrument[]>("/universe"),
+  quotes: (ids: string[]) =>
+    fetchJson<Array<Pick<Instrument, "id" | "symbol" | "name" | "asset_class" | "quote">>>(
+      `/quotes${qs({ ids: ids.join(",") })}`,
+    ),
   markets: () => fetchJson<MarketsOverview>("/markets"),
   forecasts: (assetClass?: string) =>
     fetchJson<Forecast[]>(`/forecasts${qs({ asset_class: assetClass })}`),
@@ -108,6 +114,9 @@ export const api = {
     days?: number;
     min_magnitude?: number;
   }) => fetchJson<NewsItem[]>(`/news${qs(params)}`),
+  newsAlerts: (params: { minutes?: number; min_level?: number; limit?: number } = {}) =>
+    fetchJson<NewsAlert[]>(`/news/alerts${qs(params)}`),
+  newsSources: () => fetchJson<WireSource[]>("/news/sources"),
   newsCategories: () =>
     fetchJson<Array<{ category: string; maps_to: string[] }>>("/news-categories"),
   recommendations: (status?: string) =>

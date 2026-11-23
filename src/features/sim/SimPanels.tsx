@@ -145,7 +145,7 @@ export function AssetSimulationPanel({
       actions={
         <>
           <button
-            className={cn("secondary-button !min-h-9", similar && "!border-[#1f3a27] !text-bull")}
+            className={cn("secondary-button !min-h-9", similar && "!border-bull-line !text-bull")}
             onClick={() => setSimilar((v) => !v)}
             title="Use only history from the past setups most like today"
           >
@@ -451,7 +451,7 @@ export function ScenarioPanel() {
               onClick={() => pick(preset)}
               className={cn(
                 "secondary-button !min-h-8 !py-1 text-xs",
-                query?.label === preset.label && "!border-[#1f3a27] !text-bull",
+                query?.label === preset.label && "!border-bull-line !text-bull",
               )}
             >
               {preset.label}
