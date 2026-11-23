@@ -1,0 +1,64 @@
+# Weekly research on GitHub's runners instead of Render's 512 MB instance.
+#
+# Pulls the live server's latest database snapshot (read-only), runs the research job
+# (earnings history, event studies, walk-forward backtest, replay, simulation check) and
+# publishes only those tables as a bundle in Supabase Storage. The live server, started with
+# NEXUS_RESEARCH_REMOTE=1, imports the bundle within 15 minutes (server/nexus/research_bundle.py).
+#
+# Repository secrets: SUPABASE_URL, SUPABASE_SERVICE_KEY (the same values Render uses).
+# Optional repository variable: SNAPSHOT_BUCKET (default "nexus").
+name: research
+
+on:
+  schedule:
+    - cron: "0 6 * * 6" # Saturdays 06:00 UTC, after Friday's close
+  workflow_dispatch:
+
+concurrency:
+  group: research
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  research:
+    runs-on: ubuntu-latest
+    timeout-minutes: 300
+    defaults:
+      run:
+        working-directory: server
+    env:
+      SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+      SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+      SNAPSHOT_BUCKET: ${{ vars.SNAPSHOT_BUCKET || 'nexus' }}
+      # This copy must never be pushed back over the live database.
+      NEXUS_SNAPSHOT_READONLY: "1"
+      PYTHONUNBUFFERED: "1"
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+          cache-dependency-path: server/requirements.txt
+
+      - name: Install
+        run: pip install -r requirements.txt
+
+      - name: Check secrets
+        run: |
+          if [ -z "$SUPABASE_URL" ] || [ -z "$SUPABASE_SERVICE_KEY" ]; then
+            echo "::error::Add SUPABASE_URL and SUPABASE_SERVICE_KEY as repository secrets."
+            exit 1
+          fi
+
+      - name: Pull the live snapshot (read-only)
+        run: python -m nexus snapshot pull
+
+      - name: Run research
+        run: python -m nexus research
+
+      - name: Publish the research bundle
+        run: python -m nexus bundle publish --source "github-actions run ${{ github.run_id }}"

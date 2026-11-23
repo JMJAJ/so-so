@@ -91,6 +91,11 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--run", action="store_true")
     p = sub.add_parser("snapshot", help="copy the database to/from Supabase Storage (SUPABASE_URL/SERVICE_KEY)")
     p.add_argument("action", choices=["push", "pull", "status"])
+    p = sub.add_parser("bundle", help="research results: publish (GitHub Actions) or sync (live server)")
+    p.add_argument("action", choices=["publish", "sync", "export"])
+    p.add_argument("--path", default="research_bundle.db", help="output file for 'export'")
+    p.add_argument("--source", default="manual", help="where the bundle was computed (shown in logs)")
+    p.add_argument("--force", action="store_true", help="'sync' even if already imported")
     p = sub.add_parser("replay", help="point-in-time replay of the evidence engine (use --run to recompute)")
     p.add_argument("--run", action="store_true")
     sub.add_parser("regime", help="current macro regime")
@@ -242,6 +247,16 @@ def main(argv: list[str] | None = None) -> int:
                     print(f"   {name:<9} IC {stats['ic']:+.3f}  t={stats['t_stat']:+.1f}  n={stats['n']}")
         return 0
 
+    if cmd == "bundle":
+        from . import research_bundle
+
+        if args.action == "export":
+            _print_json(research_bundle.export(args.path))
+        elif args.action == "publish":
+            _print_json(research_bundle.publish({"source": args.source}))
+        else:
+            _print_json(research_bundle.sync(force=args.force))
+        return 0
     if cmd == "snapshot":
         from . import snapshot
 
@@ -251,7 +266,10 @@ def main(argv: list[str] | None = None) -> int:
         if args.action == "push":
             _print_json(snapshot.push("cli"))
         elif args.action == "pull":
-            print("restored" if snapshot.pull(force=True) else "no snapshot found")
+            restored = snapshot.pull(force=True)
+            print("restored" if restored else "no snapshot found")
+            if not restored:
+                return 1
         else:
             _print_json(snapshot.status())
         return 0

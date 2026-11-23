@@ -37,6 +37,7 @@ The frontend is TanStack Start (React 19). The backend is a Python FastAPI packa
 | `server/nexus/agent/skills.py`, `server/nexus/skills/*.md` | Skills: playbooks the AI loads with `load_skill` (one generated from data); each call records `name@version` |
 | `server/nexus/agent/factcheck.py` | Checks t/n/% numbers in AI answers against that turn's tool results |
 | `server/nexus/agent/charts.py` | `show_chart` payloads built from stored data; the loop sends them to the UI and only a summary to the model |
+| `server/nexus/research_bundle.py`, `.github/workflows/research.yml` | Weekly research on GitHub Actions: pulls a read-only snapshot, runs `research`, publishes only research tables; the live server (`NEXUS_RESEARCH_REMOTE=1`) imports them every 15 min. Never push a snapshot from Actions |
 | `server/nexus/snapshot.py`, `server/nexus/auth.py` | Deploy: SQLite snapshots to Supabase Storage; `NEXUS_PASSWORD` login (see DEPLOY.md) |
 | `server/nexus/paper.py` | Paper broker: sizing, fills, stops/targets/expiry, correlated-risk limit, portfolio (per account) |
 | `server/nexus/accounts.py` | Paper accounts (own money, positions, trades, history, gate `strict`/`any`); the account in use comes from the `X-Nexus-Account` header via a context variable |

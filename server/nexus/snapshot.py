@@ -55,6 +55,12 @@ def enabled() -> bool:
     return _config() is not None
 
 
+def read_only() -> bool:
+    """A pulled copy that must never be pushed back (GitHub Actions research runs): pushing it
+    would overwrite whatever the live server recorded since the copy was taken."""
+    return os.environ.get("NEXUS_SNAPSHOT_READONLY", "").lower() in ("1", "true", "yes")
+
+
 def _headers(key: str, **extra: str) -> dict:
     return {"Authorization": f"Bearer {key}", "apikey": key, **extra}
 
@@ -98,6 +104,8 @@ def _db_mtime() -> float:
 def push(reason: str = "manual") -> dict:
     """Upload a consistent gzipped copy of the database (and today's dated copy)."""
     config = _config()
+    if read_only():
+        return {"pushed": False, "reason": "read-only copy (NEXUS_SNAPSHOT_READONLY)"}
     if not config or not os.path.exists(db.DB_PATH):
         return {"pushed": False, "reason": "snapshots not configured" if not config else "no database"}
     _, key, _ = config
@@ -181,7 +189,7 @@ def push_if_changed(reason: str) -> dict | None:
 
 
 def push_async(reason: str) -> None:
-    if enabled():
+    if enabled() and not read_only():
         threading.Thread(target=push_if_changed, args=(reason,), daemon=True, name="snapshot-push").start()
 
 

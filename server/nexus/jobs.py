@@ -8,7 +8,7 @@ import traceback
 from datetime import datetime, timedelta, timezone
 from typing import Callable
 
-from . import config, data, db, live, nlp, paper, recommendations, snapshot, universe
+from . import config, data, db, live, nlp, paper, recommendations, research_bundle, snapshot, universe
 from .ingest import events, gdelt, macro, news, prices, wire
 from .research import backtest, event_study, replay, scan, simulate
 
@@ -100,6 +100,11 @@ def job_research(progress) -> dict:
     return result
 
 
+def job_research_import(progress) -> dict:
+    progress("checking for a research bundle from GitHub Actions")
+    return research_bundle.sync()
+
+
 def job_sim_check(progress) -> dict:
     overall = simulate.check(progress=progress).get("overall") or {}
     return {k: overall.get(k) for k in ("n", "in80", "in50", "verdict")}
@@ -162,6 +167,7 @@ JOBS: dict[str, tuple[Callable, str]] = {
     "analyst": (job_analyst, "AI research run that writes recommendations"),
     "news_backfill": (job_news_backfill, "A year of company news + 3 months of GDELT headlines, deduped, classified"),
     "gdelt_backfill": (job_gdelt_backfill, "Backfill GDELT geopolitical history"),
+    "research_import": (job_research_import, "Import the latest research bundle computed on GitHub Actions"),
     "sim_check": (job_sim_check, "Simulation honesty check: replay the price simulator on past dates"),
 }
 
@@ -192,7 +198,7 @@ def run(name: str, progress: Callable[[str], None] | None = None) -> dict:
         db.execute("UPDATE jobs SET last_finished=?, last_status='ok', last_error=NULL, last_summary=?, duration_ms=? WHERE name=?",
                    (db.now_iso(), db.dumps(result)[:4000], int((time.time() - started) * 1000), name))
         live.publish("job", name=name, status="ok")
-        if name not in ("monitor", "wire"):
+        if name not in ("monitor", "wire") and not (name == "research_import" and result.get("skipped")):
             snapshot.push_async(f"after {name}")
         return result
     except Exception as exc:
@@ -276,7 +282,12 @@ def start_scheduler() -> None:
                       next_run_time=soon)
     scheduler.add_job(safe("daily"), CronTrigger(hour=21, minute=45, timezone="UTC"), id="daily")
     scheduler.add_job(safe("analyst"), CronTrigger(hour=22, minute=30, timezone="UTC"), id="analyst")
-    scheduler.add_job(safe("research"), CronTrigger(day_of_week="sat", hour=6, timezone="UTC"), id="research")
+    if research_bundle.remote_research():
+        # Research runs on GitHub Actions (.github/workflows/research.yml); only import its results.
+        scheduler.add_job(safe("research_import"), IntervalTrigger(minutes=15), id="research_import",
+                          next_run_time=soon + timedelta(minutes=2))
+    else:
+        scheduler.add_job(safe("research"), CronTrigger(day_of_week="sat", hour=6, timezone="UTC"), id="research")
     scheduler.add_job(safe("gdelt_backfill"), IntervalTrigger(hours=2), id="gdelt_backfill",
                       next_run_time=soon + timedelta(minutes=10))
     scheduler.start()

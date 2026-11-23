@@ -117,23 +117,44 @@ https://cron-job.org job calling `https://nexus-api-01di.onrender.com/api/health
 minutes** wakes it from outside. That's the only route that works without logging in, and it
 exposes no data.
 
+## 6. Research on GitHub Actions (free, keeps Render under 512 MB)
+
+The Saturday research job (event studies, backtest, replay, simulation check) is too heavy for
+Render's free instance, so it runs on GitHub's runners (`.github/workflows/research.yml`):
+
+1. GitHub repo → **Settings → Secrets and variables → Actions → New repository secret**: add
+   `SUPABASE_URL` and `SUPABASE_SERVICE_KEY` (the same values as on Render). Secrets are hidden
+   from logs and from forks, even on a public repo. If your bucket isn't `nexus`, add a
+   repository **variable** `SNAPSHOT_BUCKET`.
+2. Render already has `NEXUS_RESEARCH_REMOTE=1` (from `render.yaml`; add it by hand if you set the
+   service up manually). With it, the server stops running research itself and checks every 15
+   minutes for a newer bundle to import.
+3. Run it once now: repo → **Actions → research → Run workflow**. When it's green, within 15
+   minutes Settings → jobs shows `research_import` ok.
+
+The workflow pulls the latest snapshot as a **read-only** copy (`NEXUS_SNAPSHOT_READONLY=1` stops
+it ever being pushed back), runs the research and uploads only the research tables to
+`research/latest.db.gz`. The server merges those tables in one transaction. Paper trades,
+recommendations, news and settings are never in the bundle, so nothing recorded during the run is
+lost. A run that produced no event studies or models is refused on both sides.
+
 ## What runs on its own (UTC)
 
 | Job | When |
 |---|---|
 | fills, stops, targets, expiry | every 5 min (every minute while a browser is open) |
-| news + classification | every 30 min |
+| breaking-news wire | about every minute |
+| news + classification | every 10 min |
 | daily data, scoring, post-mortems | 21:45 |
 | AI market brief and new calls | 22:30 |
-| event studies, backtest, replay | Saturday 06:00 |
+| event studies, backtest, replay | Saturday 06:00 on GitHub Actions; imported within 15 min |
 
 ## Things to watch
 
 - **Supabase pausing**: if Supabase still emails a pause warning, open the project dashboard once
   (that counts as activity) and check that `nexus_heartbeat.beat_at` is recent.
-- **Memory**: free instances have 512 MB. If the Saturday research job crashes the service
-  (Render shows "Out of memory" events), run that job locally and push a snapshot, or upgrade
-  the instance.
+- **Memory**: free instances have 512 MB. Research runs on GitHub Actions for this reason (step 6).
+  Without `NEXUS_RESEARCH_REMOTE=1` it runs on Render and may crash it ("Out of memory" events).
 - **Yahoo**: yfinance sometimes rate-limits cloud IPs. Missing prices show up as stale quotes
   and `bars failed` in Settings → jobs.
 - **Two copies**: after you deploy, your local database and the cloud one drift apart. To pull
