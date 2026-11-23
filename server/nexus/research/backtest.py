@@ -12,7 +12,6 @@ from __future__ import annotations
 
 import numpy as np
 import pandas as pd
-from scipy.stats import spearmanr
 
 from .. import db, universe
 from .signals import HORIZON, SIGNALS, panel
@@ -35,6 +34,8 @@ def _ic(pred: np.ndarray, y: np.ndarray) -> tuple[float, float, int]:
     n = len(y)
     if n < 20:
         return 0.0, 0.0, n
+    from scipy.stats import spearmanr  # research-only; keeps scipy out of the live server
+
     ic = float(spearmanr(pred, y).statistic)
     if np.isnan(ic):
         return 0.0, 0.0, n

@@ -5,7 +5,7 @@ from __future__ import annotations
 import threading
 import time
 
-from .. import config, db, nlp
+from .. import config, db, memory, nlp
 from . import event_study, signals
 
 TTL = 6 * 3600
@@ -22,11 +22,18 @@ def forecasts(*, refresh: bool = False, progress=None) -> list[dict]:
         if time.time() - _cache["at"] >= TTL and not _lock.locked():
             threading.Thread(target=_recompute, daemon=True, name="forecasts").start()
         return rows
+    asked = time.time()
     with _lock:
-        # Someone else may have finished a computation while this call waited for the lock.
-        if not refresh and _cache["rows"]:
+        # Someone else may have finished a computation while this call waited for the lock:
+        # use it instead of computing the same thing twice in a row.
+        if _cache["rows"] and (not refresh or _cache["at"] >= asked):
             return _cache["rows"]
         return _compute(progress)
+
+
+def mark_stale() -> None:
+    """Recompute on the next read (in the background), not now."""
+    _cache["at"] = 0.0
 
 
 def _recompute() -> None:
@@ -56,6 +63,7 @@ def _compute(progress) -> list[dict]:
         row["news_flow"] = sum((n.get("direction") or 0) * (n.get("magnitude") or 0) for n in news)
         row["news_count"] = len(news)
     _cache.update(at=time.time(), rows=rows)
+    memory.trim()
     db.log("info", "scan", f"Scanned {len(rows)} instruments")
     return rows
 

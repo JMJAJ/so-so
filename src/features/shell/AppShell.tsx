@@ -44,8 +44,9 @@ export default function AppShell() {
   const status = useQuery({
     queryKey: ["status"],
     queryFn: api.status,
-    // Changes arrive over the live stream; polling is only a fallback.
-    refetchInterval: 30_000,
+    // Changes arrive over the live stream; polling is only a fallback. While the server is
+    // unreachable (a Render restart takes about a minute), check every 5 s instead.
+    refetchInterval: (query) => (query.state.error ? 5_000 : 30_000),
     retry: false,
   });
   const live = useLiveUpdates();
@@ -65,6 +66,9 @@ export default function AppShell() {
   const Current = VIEWS[view].component;
   const drawerOpen = chat.open && view !== "chat";
   const offline = Boolean(status.error);
+  // Never reached the server: nothing to show. Lost it after loading: keep the page and its
+  // cached data on screen and say we're reconnecting, instead of blanking everything.
+  const neverConnected = offline && !status.data;
   const showRail = railOpen && !drawerOpen && view !== "chat" && !offline;
 
   return (
@@ -112,7 +116,8 @@ export default function AppShell() {
           <main className="min-w-0 flex-1 overflow-y-auto" id="main">
             <div className="mx-auto max-w-[1480px] px-4 pt-5 pb-24 lg:px-7 lg:pb-10">
               <BootstrapBanner status={status.data} />
-              {offline ? (
+              {offline && !neverConnected && <Reconnecting since={status.dataUpdatedAt} />}
+              {neverConnected ? (
                 <Offline />
               ) : (
                 <Suspense fallback={<Loading />}>
@@ -180,6 +185,19 @@ function BootstrapBanner({ status }: { status?: SystemStatus }) {
           {init?.progress ??
             (init?.last_status === "error" ? "Bootstrap failed — see Settings → jobs." : "")}
         </span>
+      </span>
+    </div>
+  );
+}
+
+function Reconnecting({ since }: { since: number }) {
+  return (
+    <div className="mb-4 flex items-center gap-2 rounded-2xl border border-amber-line bg-amber-soft px-4 py-2.5 text-sm text-amber">
+      <Loader2 className="h-4 w-4 shrink-0 animate-spin" />
+      <span>
+        Reconnecting to the server. Showing data from{" "}
+        {since ? new Date(since).toLocaleTimeString() : "earlier"}; it refreshes by itself when the
+        server is back (a restart takes about a minute).
       </span>
     </div>
   );

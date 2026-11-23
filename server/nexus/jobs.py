@@ -8,7 +8,7 @@ import traceback
 from datetime import datetime, timedelta, timezone
 from typing import Callable
 
-from . import config, data, db, live, nlp, paper, recommendations, research_bundle, snapshot, universe
+from . import config, data, db, live, memory, nlp, paper, recommendations, research_bundle, snapshot, universe
 from .ingest import events, gdelt, macro, news, prices, wire
 from .research import backtest, event_study, replay, scan, simulate
 
@@ -211,6 +211,7 @@ def run(name: str, progress: Callable[[str], None] | None = None) -> dict:
         with _lock:
             _running.discard(name)
         _progress.pop(name, None)
+        memory.trim()
 
 
 def run_async(name: str) -> None:

@@ -6,7 +6,7 @@ import json
 import threading
 import uuid
 
-from .. import config, db, llm, recommendations
+from .. import memory, config, db, llm, recommendations
 from ..research import scan
 from ..research.features import regime_frame, regime_label
 from . import loop, tools
@@ -86,6 +86,7 @@ def run(*, max_recs: int | None = None, focus: str | None = None, on_event=None)
         raise
     finally:
         _lock.release()
+        memory.trim()
 
 
 def running() -> bool:

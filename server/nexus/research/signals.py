@@ -16,9 +16,10 @@ window:
 
 from __future__ import annotations
 
+import math
+
 import numpy as np
 import pandas as pd
-from scipy.stats import norm
 
 from .. import data, db, universe
 from ..taxonomy import EVENT_TYPES
@@ -171,7 +172,7 @@ def apply_model(model: dict, row: pd.Series) -> dict:
         "sigma": sigma,
         "score": score,
         "prob_up": prob_up,
-        "prob_naive": float(norm.cdf(score)),
+        "prob_naive": 0.5 * (1 + math.erf(score / math.sqrt(2))),  # standard normal CDF
         "contributions": contributions,
     }
 

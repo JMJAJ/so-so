@@ -17,7 +17,6 @@ from __future__ import annotations
 
 import numpy as np
 import pandas as pd
-from scipy import stats as sstats
 
 from .. import data, db, universe
 from ..taxonomy import EVENT_TYPES, label
@@ -27,6 +26,14 @@ HORIZONS = (0, 5, 10, 20, 40)
 MIN_N = 5
 RELIABLE_N = 8
 FDR_Q = 0.10
+
+
+def _t_two_sided(t: float, df: int) -> float:
+    """Two-sided p-value of a t statistic. scipy is imported here, not at module load, so the
+    live server (which only reads stored results) doesn't carry it in memory."""
+    from scipy.special import stdtr
+
+    return float(2 * stdtr(df, -abs(t)))
 
 
 def _benchmarks() -> dict[str, str | None]:
@@ -54,7 +61,7 @@ def _stats(sample: pd.Series, population: pd.Series) -> dict | None:
     mean, baseline = float(sample.mean()), float(population.mean())
     var = float(sample.var(ddof=1)) / n + float(population.var(ddof=1)) / len(population)
     t_stat = (mean - baseline) / np.sqrt(var) if var > 0 else 0.0
-    p_value = float(2 * sstats.t.sf(abs(t_stat), df=max(n - 1, 1)))
+    p_value = _t_two_sided(t_stat, max(n - 1, 1))
     ordered = sample.sort_index() if isinstance(sample.index, pd.DatetimeIndex) else sample
     half = n // 2
     early = float(ordered.iloc[:half].mean()) - baseline
