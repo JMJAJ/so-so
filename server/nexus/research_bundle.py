@@ -178,14 +178,14 @@ def sync(force: bool = False) -> dict:
 
 
 def _refresh_caches() -> None:
-    from . import data
+    """Drop cached frames and let forecasts rebuild lazily on the next read. Rebuilding right
+    here, while the analyst or a page may be doing the same, is what pushed Render past 512 MB."""
+    from . import data, memory
     from .research import scan
 
     data.invalidate()
-    try:
-        scan.forecasts(refresh=True)
-    except Exception as exc:  # forecasts rebuild on the next request anyway
-        db.log("warn", "research", f"forecast refresh after import: {exc}")
+    scan.mark_stale()
+    memory.trim()
 
 
 def remote_research() -> bool:

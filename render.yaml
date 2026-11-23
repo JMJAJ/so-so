@@ -22,6 +22,11 @@ services:
     envVars:
       - key: PYTHON_VERSION
         value: 3.13.5
+      # glibc gives every thread its own malloc arena and keeps freed memory in them; with the
+      # scheduler, news wire and request threads that alone can eat the 512 MB. Two arenas
+      # (plus nexus/memory.py trimming after heavy work) keep RSS flat.
+      - key: MALLOC_ARENA_MAX
+        value: "2"
       # Login for the public site (pick a long one).
       - key: NEXUS_PASSWORD
         sync: false

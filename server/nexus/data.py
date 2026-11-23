@@ -5,24 +5,38 @@ from __future__ import annotations
 import threading
 import time
 
+import numpy as np
 import pandas as pd
 
-from . import db
+from . import db, memory
 
 _cache: dict[tuple, tuple[float, object]] = {}
 _lock = threading.Lock()
+_loading: dict[tuple, threading.Lock] = {}
 TTL = 300
+# Daily bars change only when the daily job or a research import runs, and both call
+# invalidate(); the TTL is just a safety net. Rebuilding the wide frame is the most
+# memory-hungry thing the server does, so it must not happen every few minutes.
+CLOSES_TTL = 6 * 3600
 
 
-def _cached(key: tuple, loader):
+def _cached(key: tuple, loader, ttl: float = TTL):
     now = time.time()
     with _lock:
         hit = _cache.get(key)
-        if hit and now - hit[0] < TTL:
+        if hit and now - hit[0] < ttl:
             return hit[1]
-    value = loader()
-    with _lock:
-        _cache[key] = (now, value)
+        key_lock = _loading.setdefault(key, threading.Lock())
+    # One loader per key: concurrent callers (analyst + import + page loads) wait for it
+    # instead of each building their own copy at the same time.
+    with key_lock:
+        with _lock:
+            hit = _cache.get(key)
+            if hit and time.time() - hit[0] < ttl:
+                return hit[1]
+        value = loader()
+        with _lock:
+            _cache[key] = (time.time(), value)
     return value
 
 
@@ -36,11 +50,28 @@ def closes(start: str | None = None) -> pd.DataFrame:
     calendars (crypto trades weekends) only inside the frame, never beyond the last real print."""
 
     def load() -> pd.DataFrame:
-        frame = pd.DataFrame(db.rows("SELECT instrument_id, date, close FROM bars"))
-        if frame.empty:
+        # One instrument at a time, straight into float arrays: building the frame from one
+        # dict per bar (~400k of them) peaked at ~180 MB for what is a ~3 MB table.
+        conn = db.connect()
+        try:
+            ids = [row[0] for row in conn.execute("SELECT DISTINCT instrument_id FROM bars")]
+            columns = {}
+            for instrument_id in ids:
+                rows = conn.execute("SELECT date, close FROM bars WHERE instrument_id=? ORDER BY date",
+                                    (instrument_id,)).fetchall()
+                if rows:
+                    columns[instrument_id] = pd.Series(
+                        np.fromiter((r[1] if r[1] is not None else np.nan for r in rows), dtype=float,
+                                    count=len(rows)),
+                        index=pd.DatetimeIndex([r[0] for r in rows]),
+                    )
+        finally:
+            conn.close()
+        if not columns:
             return pd.DataFrame()
-        wide = frame.pivot(index="date", columns="instrument_id", values="close")
-        wide.index = pd.to_datetime(wide.index)
+        wide = pd.DataFrame(columns).sort_index(axis=1)
+        wide.index.name = "date"
+        wide.columns.name = "instrument_id"
         wide = wide.sort_index()
         # Keep business days only so equities, FX and crypto share one calendar.
         wide = wide[wide.index.dayofweek < 5]
@@ -51,7 +82,12 @@ def closes(start: str | None = None) -> pd.DataFrame:
                 filled.loc[filled.index > last, column] = float("nan")
         return filled
 
-    wide = _cached(("closes",), load)
+    def load_and_trim() -> pd.DataFrame:
+        frame = load()
+        memory.trim()
+        return frame
+
+    wide = _cached(("closes",), load_and_trim, ttl=CLOSES_TTL)
     if start and not wide.empty:
         return wide[wide.index >= pd.Timestamp(start)]
     return wide

@@ -26,7 +26,6 @@ from typing import Callable
 
 import numpy as np
 import pandas as pd
-from scipy import stats as sstats
 
 from .. import accounts, data, db, paper, universe
 from ..taxonomy import EVENT_TYPES, label
@@ -370,7 +369,7 @@ def _effect(close: pd.Series, dates: list[pd.Timestamp], horizon: int) -> dict |
     stable = half >= 2 and np.sign(values.iloc[:half].mean() - normal) == np.sign(values.iloc[half:].mean() - normal)
     return {"n": int(len(values)), "mean": round(float(values.mean()), 5), "median": round(float(values.median()), 5),
             "hit_rate": round(float((values > 0).mean()), 4), "normal": round(normal, 5), "edge": round(edge, 5),
-            "t_stat": round(float(t), 2), "p_value": float(2 * sstats.t.sf(abs(t), len(values) - 1)),
+            "t_stat": round(float(t), 2), "p_value": event_study._t_two_sided(float(t), len(values) - 1),
             "stable": bool(stable)}
 
 
