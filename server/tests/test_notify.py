@@ -1,9 +1,13 @@
+import threading
+import time
 from datetime import date, datetime, timedelta, timezone
 
 import pytest
 
 from nexus import config, db, notify, universe
 from nexus.ingest import prices
+
+REAL_QUOTES = prices.quotes
 
 
 @pytest.fixture()
@@ -123,3 +127,37 @@ def test_previous_close_uses_current_bars_and_falls_back_to_yahoo(nexus_db, monk
     later = monday + timedelta(days=21)
     prices.previous_closes([(item, later)])
     assert asked
+
+
+def test_universe_quotes_never_wait_on_yahoo(nexus_db, monkeypatch):
+    """The search list asks for every instrument; it answers from stored closes at once and
+    refreshes in the background, and a symbol Yahoo can't price isn't retried on every call."""
+    monkeypatch.setattr(prices, "quotes", REAL_QUOTES)  # the fixture stubs it; test the real one
+    monkeypatch.setattr(prices, "_attempted", {})
+    monkeypatch.setattr(prices, "_quotes", {})
+    item = universe.require("stock:aapl")
+    db.execute("INSERT INTO bars(instrument_id,date,open,high,low,close,volume) VALUES(?,?,?,?,?,?,?)",
+               (item.id, "2026-11-20", 1, 1, 1, 200.0, 1))
+    started, release = threading.Event(), threading.Event()
+    calls = []
+
+    def slow_refresh(items):
+        calls.append([i.id for i in items])
+        started.set()
+        release.wait(5)
+        for i in items:
+            prices._attempted[i.id] = time.time()
+
+    monkeypatch.setattr(prices, "_refresh_quotes", slow_refresh)
+    out = prices.quotes([item.id, "crypto:btc"], wait=False)
+    assert out[item.id]["price"] == 200.0 and out[item.id]["stale"]
+    assert started.wait(2)
+    prices.quotes([item.id], wait=False)  # one background refresh at a time
+    release.set()
+    for _ in range(100):
+        if prices._background.acquire(blocking=False):
+            prices._background.release()
+            break
+        time.sleep(0.02)
+    prices.quotes([item.id], wait=False)  # just attempted: no new download
+    assert calls == [[item.id, "crypto:btc"]]

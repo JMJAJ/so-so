@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import threading
 import time
 from datetime import date, datetime, timedelta, timezone
 from typing import Callable
@@ -106,17 +107,40 @@ def update_bars(
 # ── Live quotes ──────────────────────────────────────────────────────────────
 
 QUOTE_TTL = 30
+# Background refreshes of many instruments (the search list) are kept rarer: each one is a
+# minute of downloads on a small CPU that page requests share.
+BACKGROUND_TTL = 300
 STALE_AFTER = {"crypto": 30 * 60, "forex": 60 * 60, "stock": 60 * 60, "etf": 60 * 60, "commodity": 60 * 60, "index": 60 * 60}
 _quotes: dict[str, dict] = {}
+# When each instrument was last asked for, found or not: a symbol Yahoo has no intraday bars for
+# would otherwise be downloaded again on every single call.
+_attempted: dict[str, float] = {}
+_background = threading.Lock()
 
 
-def quotes(instrument_ids: list[str]) -> dict[str, dict]:
+def quotes(instrument_ids: list[str], *, wait: bool = True) -> dict[str, dict]:
+    """Latest quotes. With `wait=False` the answer comes from the cache (or the last stored close)
+    at once and stale instruments refresh in the background: the whole universe takes about a
+    minute to download on the free host, far too long to hold a page request for."""
     items = [item for value in instrument_ids if (item := universe.resolve(value))]
     now = time.time()
-    missing = [item for item in items if now - _quotes.get(item.id, {}).get("fetched_at", 0) >= QUOTE_TTL]
+    ttl = QUOTE_TTL if wait else BACKGROUND_TTL
+    missing = [item for item in items if now - _attempted.get(item.id, 0) >= ttl]
     if missing:
-        _refresh_quotes(missing)
+        if wait:
+            _refresh_quotes(missing)
+        elif _background.acquire(blocking=False):
+            threading.Thread(target=_refresh_in_background, args=(missing,), daemon=True, name="quotes").start()
     return {item.id: _public(item) for item in items}
+
+
+def _refresh_in_background(items: list[Instrument]) -> None:
+    try:
+        _refresh_quotes(items)
+    except Exception as exc:  # keep serving the cached quotes
+        db.log("warn", "quotes", f"background refresh failed: {exc}")
+    finally:
+        _background.release()
 
 
 def quote(instrument_id: str) -> dict | None:
@@ -148,6 +172,8 @@ def _refresh_quotes(items: list[Instrument]) -> None:
     """Latest price from 1-minute bars; instruments with no 1-minute data today (market not
     open yet) fall back to the last 15-minute bar of the past five days."""
     fetched_at = time.time()
+    for item in items:
+        _attempted[item.id] = fetched_at
     missing = _fetch_quotes(items, period="1d", interval="1m", fetched_at=fetched_at)
     if missing:
         _fetch_quotes(missing, period="5d", interval="15m", fetched_at=fetched_at)
