@@ -143,6 +143,17 @@ def _refresh_in_background(items: list[Instrument]) -> None:
         _background.release()
 
 
+def cached_quotes(instrument_ids: list[str]) -> dict[str, dict]:
+    """Quotes already in memory, without starting any download. For scans that ride along on
+    whatever the pages and the watch job have refreshed anyway."""
+    out = {}
+    for value in instrument_ids:
+        item = universe.resolve(value)
+        if item and item.id in _quotes:
+            out[item.id] = _public(item)
+    return out
+
+
 def quote(instrument_id: str) -> dict | None:
     item = universe.resolve(instrument_id)
     return quotes([item.id])[item.id] if item else None

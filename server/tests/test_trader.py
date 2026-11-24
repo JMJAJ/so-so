@@ -166,3 +166,20 @@ def test_alert_triggers_runs_for_tagged_assets(synthetic, no_threads):
     assert trader.on_alerts([minor]) == 0
     instrument_id, reason, review = no_threads[0]
     assert instrument_id == "stock:nvda" and "CEO" in reason and not review
+
+
+def test_watch_scan_never_refreshes_the_whole_universe(synthetic, no_threads, monkeypatch):
+    from nexus import notify
+    from nexus.ingest import prices
+
+    asked = []
+
+    def quotes(ids, **_):
+        asked.extend(ids)
+        return {}
+
+    monkeypatch.setattr(prices, "quotes", quotes)
+    monkeypatch.setattr(prices, "cached_quotes", lambda ids: {})
+    trader.check_moves()
+    assert set(asked) <= notify.watched_ids() | set(notify.CORE)
+    assert len(asked) < 20
