@@ -106,6 +106,8 @@ export interface Recommendation {
   close_skills?: string[];
   /** For AI early closes: what holding to stop/target/horizon would have returned. */
   hold_return?: number | null;
+  size_tier?: "core" | "tactical" | "base_rate" | "override" | null;
+  risk_mult?: number | null;
   lesson?: string | null;
 }
 

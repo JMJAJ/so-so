@@ -62,8 +62,8 @@ def _fee(item: universe.Instrument, quantity: float, price: float) -> float:
 
 # ── Sizing & orders ──────────────────────────────────────────────────────────
 
-def size_for(item: universe.Instrument, entry: float, stop: float, equity: float) -> float:
-    risk_budget = equity * config.get_float("risk_per_trade")
+def size_for(item: universe.Instrument, entry: float, stop: float, equity: float, risk_mult: float = 1.0) -> float:
+    risk_budget = equity * config.get_float("risk_per_trade") * max(0.0, min(float(risk_mult), 1.5))
     per_unit = abs(entry - stop) * _usd_per_unit_move(item, entry)
     if per_unit <= 0:
         return 0.0
@@ -113,7 +113,7 @@ def correlated_risk(instrument_id: str, side: str, account_id: str | None = None
 
 def open_position(instrument_id: str, side: str, *, stop: float, target: float | None, expires_at: str | None,
                   recommendation_id: str | None = None, source: str = "manual", quantity: float | None = None,
-                  account_id: str | None = None, concentrated: bool = False) -> dict:
+                  account_id: str | None = None, concentrated: bool = False, risk_mult: float = 1.0) -> dict:
     item = universe.require(instrument_id)
     if not item.tradable:
         raise ValueError(f"{item.symbol} is research-only")
@@ -137,7 +137,7 @@ def open_position(instrument_id: str, side: str, *, stop: float, target: float |
         raise ValueError("No price available")
     if (side == "long" and stop >= reference) or (side == "short" and stop <= reference):
         raise ValueError("Stop is on the wrong side of the current price")
-    qty = quantity if quantity else size_for(item, reference, stop, snapshot["equity"])
+    qty = quantity if quantity else size_for(item, reference, stop, snapshot["equity"], risk_mult)
     if qty <= 0:
         raise ValueError("Position size rounds to zero for this risk budget")
     exposure_after = snapshot["exposure"] + notional(item, qty, reference)

@@ -17,13 +17,18 @@ from .ingest import prices
 CONFIDENCE = ("low", "medium", "high")
 
 
+# Calls made without a person in the loop: the daily analyst and the live event trader.
+UNATTENDED = ("analyst", "event")
+MIN_HORIZON = 2
+
+
 def _validate(payload: dict, price: float) -> dict:
     direction = str(payload.get("direction", "")).lower()
     if direction not in ("long", "short"):
         raise ValueError("direction must be long or short")
     horizon = int(payload.get("horizon_days") or 20)
-    if not 3 <= horizon <= 60:
-        raise ValueError("horizon_days must be between 3 and 60")
+    if not MIN_HORIZON <= horizon <= 60:
+        raise ValueError(f"horizon_days must be between {MIN_HORIZON} and 60")
     stop, target = float(payload["stop"]), float(payload["target"])
     if direction == "long" and not stop < price < target:
         raise ValueError(f"long needs stop < price ({price:g}) < target")
@@ -48,6 +53,8 @@ def _validate(payload: dict, price: float) -> dict:
         "expected_return": payload.get("expected_return"),
         "stated_probability": payload.get("stated_probability"),
         "base_probability": payload.get("base_probability"),
+        "size_tier": payload.get("size_tier"),
+        "risk_mult": float(payload.get("risk_mult") or 1.0),
     }
 
 
@@ -87,11 +94,13 @@ def create(payload: dict, *, source: str, run_id: str | None = None, signal_snap
          clean["invalidation"], db.dumps(signal_snapshot) if signal_snapshot else None, source, run_id, "open",
          expires_at),
     )
+    db.execute("UPDATE recommendations SET size_tier=?, risk_mult=? WHERE id=?",
+               (clean["size_tier"], clean["risk_mult"], rec_id))
     if skills:
         db.execute("UPDATE recommendations SET skills=? WHERE id=?", (db.dumps(skills), rec_id))
     # The analyst trades its calls in every account with autopilot on; chat and manual calls go
     # to the account in use. `auto_trade` overrides the account setting (tests, API callers).
-    if source == "analyst" and auto_trade is None:
+    if source in UNATTENDED and auto_trade is None:
         targets = [a for a in accounts.all_accounts() if a["autopilot"]]
     else:
         account = accounts.get()
@@ -102,7 +111,8 @@ def create(payload: dict, *, source: str, run_id: str | None = None, signal_snap
         try:
             position = paper.open_position(item.id, clean["direction"], stop=clean["stop"], target=clean["target"],
                                            expires_at=expires_at, recommendation_id=rec_id, source=source,
-                                           account_id=account["id"], concentrated=concentrated)
+                                           account_id=account["id"], concentrated=concentrated,
+                                           risk_mult=clean["risk_mult"])
             db.execute("UPDATE recommendations SET position_id=COALESCE(position_id, ?) WHERE id=?",
                        (position["id"], rec_id))
         except (ValueError, KeyError) as exc:
@@ -160,7 +170,8 @@ def trade(rec_id: str) -> dict:
     if traded(rec):
         raise ValueError(f"{rec['symbol']} already has a paper position in this account")
     position = paper.open_position(rec["instrument_id"], rec["direction"], stop=rec["stop"], target=rec["target"],
-                                   expires_at=rec["expires_at"], recommendation_id=rec_id, source="manual")
+                                   expires_at=rec["expires_at"], recommendation_id=rec_id, source="manual",
+                                   risk_mult=rec.get("risk_mult") or 1.0)
     db.execute("UPDATE recommendations SET position_id=COALESCE(position_id, ?) WHERE id=?", (position["id"], rec_id))
     live.publish("recommendations")
     return get(rec_id)

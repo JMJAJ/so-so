@@ -76,6 +76,12 @@ export function AiCallCard({ rec, symbol }: { rec: Recommendation | undefined; s
         <div className="flex flex-col">
           <span className="text-[11px] text-white/75">Win probability (computed)</span>
           <span className="font-mono text-3xl font-semibold">{pct(rec.probability, 0, false)}</span>
+          {rec.size_tier && (
+            <span className="text-[11px] text-white/75">
+              Size: {rec.size_tier.replace("_", " ")} ({pct(rec.risk_mult ?? 1, 0, false)} of risk
+              budget)
+            </span>
+          )}
         </div>
         <div className="flex flex-col items-end">
           <span className="text-[11px] text-white/75">
@@ -125,6 +131,8 @@ const STEP_NAMES: Record<string, string> = {
   correlations: "Lead-lag drivers",
   technical: "Technicals",
   calibration: "Probability engine",
+  shock_reaction: "Shock reaction",
+  sizing: "Position size",
   gate_override: "Gate",
 };
 

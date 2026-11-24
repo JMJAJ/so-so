@@ -192,7 +192,8 @@ def on_alerts(alerts: list[dict]) -> None:
                 priority=4 if alert["level"] >= 3 or mine else 3, tags=["newspaper"],
                 click=alert.get("url") or link, actions=actions):
             sent_last_hour += 1
-        if alert["level"] >= 3 and (tradable or "central-bank" in alert["kinds"]):
+        if alert["level"] >= 3 and ((tradable and not config.get_bool("event_trader"))
+                                    or (not tradable and "central-bank" in alert["kinds"])):
             maybe_auto_analyst(f"Breaking news: {alert['title']}" +
                                (f" (affects {', '.join(_symbol(t) for t in tradable[:4])})" if tradable else ""))
 
@@ -314,7 +315,7 @@ def check_moves() -> dict:
                 priority=4 if abs(z) >= threshold + 1 or mine else 3,
                 tags=["chart_with_upwards_trend" if change > 0 else "chart_with_downwards_trend"], click=link):
             sent += 1
-            if mine and abs(z) >= threshold + 1:
+            if mine and abs(z) >= threshold + 1 and not config.get_bool("event_trader"):
                 maybe_auto_analyst(f"{symbol} moved {change:+.1f}% today ({abs(z):.1f}σ). Find out why and whether "
                                    f"it is a buy, a sell or a reason to change an open position.")
     return {"checked": len(quotes), "sent": sent}

@@ -395,6 +395,9 @@ COLUMN_MIGRATIONS = [
     ("recommendations", "hold_return REAL"),
     # Post-mortem lesson written after the call closed.
     ("recommendations", "lesson TEXT"),
+    # Sizing tier the server gave the call (core / tactical / base_rate / override) and the
+    # fraction of the normal risk budget its paper positions use.
+    ("recommendations", "size_tier TEXT"), ("recommendations", "risk_mult REAL"),
     # Paper accounts (existing rows belong to the default account).
     ("positions", "account_id TEXT NOT NULL DEFAULT 'main'"),
     ("trades", "account_id TEXT NOT NULL DEFAULT 'main'"),

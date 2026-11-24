@@ -66,6 +66,13 @@ DEFAULTS: dict[str, str] = {
     "notify_exits": "true",
     # A top alert or a big move on a watched asset starts a focused analyst run (at most every 3 h).
     "notify_auto_analyst": "true",
+    # Live event trader (agent/trader.py): a focused AI run on one asset when breaking news at
+    # this wire level or above tags it, or it moves this many of its own daily σ. Held positions
+    # are reviewed on any major alert or 2σ move against them.
+    "event_trader": "true",
+    "event_trade_level": "3",
+    "event_trade_sigma": "2.5",
+    "event_trade_max_per_hour": "6",
     # Where tapping a notification opens: the site you use (Vercel URL). Or set NEXUS_PUBLIC_URL.
     "public_url": "",
 }
