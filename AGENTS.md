@@ -27,6 +27,8 @@ The frontend is TanStack Start (React 19). The backend is a Python FastAPI packa
 | `server/nexus/research/features.py` | Point-in-time technicals and market regime |
 | `server/nexus/research/event_study.py` | Per (event type × asset) beta-adjusted forward returns, edge, t-stat, BH q-value, split-half stability, `reliable` flag |
 | `server/nexus/research/probability.py` | Trade probability and expected value from a bracket simulation, reliable evidence and calibration |
+| `server/nexus/research/reaction.py` | Shock reactions: what followed past ≥2σ moves (per asset and per class pooled by date, BH across the universe); conditions the bracket base rate on a live shock |
+| `server/nexus/agent/trader.py` | Live event trader: wire alerts and σ-shocks start a focused one-asset AI run (skill `event-trade`) that can buy, short, close or pass; once per asset/day/side, rate-limited |
 | `server/nexus/research/replay.py` | Point-in-time replay of the evidence engine (`replay_calls`); feeds calibration |
 | `server/nexus/research/analogs.py` | Nearest-neighbour historical states and forward paths |
 | `server/nexus/research/simulate.py` | Monte Carlo (filtered historical simulation): one asset, the whole account, what-if scenarios, and the honesty check (`sim_checks`) replayed on past dates |
@@ -67,6 +69,9 @@ npm run typecheck && npm run lint                # frontend checks
 - **The server owns probabilities.** `propose_recommendation` computes them in
   `research/probability.py` and rejects calls with EV ≤ 0, unless the account in use has gate `any`
   (then it records them, tagged `gate_override`). Never reintroduce LLM-stated probabilities.
+  Calls that pass are sized by evidence tier (`core` 100%, `tactical` 60%, `base_rate` 35%,
+  `override` 25% of `risk_per_trade`), stored as `size_tier`/`risk_mult`: thin evidence means a
+  small trade, not a vetoed one.
 - **Accounts.** AI recommendations are shared; positions, trades and equity snapshots carry
   `account_id`. Code that reads them must filter by `accounts.current()` (or an explicit account).
 - **Skills are process, not beliefs.** A skill says how to check something with the tools, never

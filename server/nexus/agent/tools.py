@@ -261,6 +261,44 @@ def _confidence(prob: dict) -> str:
     return "low"
 
 
+# Size instead of veto: every call with positive expected value is tradable, and the server
+# scales its risk budget by how much measured evidence stands behind it.
+SIZE_TIERS = {
+    "core": (1.0, "two or more kinds of reliable evidence agree, or one strong one (p >= 58%)"),
+    "tactical": (0.6, "one kind of reliable evidence (event effect, shock reaction or validated model)"),
+    "base_rate": (0.35, "positive expected value from the bracket's history only; no reliable evidence beyond it"),
+    "override": (0.25, "below the evidence gate, placed by the user"),
+}
+
+
+def size_tier(prob: dict, override: bool = False) -> tuple[str, float, str]:
+    if override:
+        tier = "override"
+    elif len(prob.get("evidence_kinds") or []) >= 2 or (prob["has_evidence"] and prob["probability"] >= 0.58):
+        tier = "core"
+    elif prob["has_evidence"]:
+        tier = "tactical"
+    else:
+        tier = "base_rate"
+    mult, why = SIZE_TIERS[tier]
+    return tier, mult, why
+
+
+def shock_reaction(instrument: str, side: str | None = None, sigma: float | None = None) -> dict:
+    """Today's move in σ and what followed past shocks like it on this asset."""
+    from ..research import reaction
+
+    item = _inst(instrument)
+    quote = prices.quote(item.id)
+    shock = reaction.current_shock(item.id, quote)
+    side = side or (shock["side"] if shock else "down")
+    result = reaction.reaction(item.id, side, float(sigma) if sigma else reaction.SIGMA)
+    return {"today": shock, **result,
+            "note": "Continuation means trade with the shock, reversal means fade it. Only reliable horizons "
+                    "(q <= 0.10, stable halves, n >= 15) count; propose_recommendation uses them automatically "
+                    "when a shock >= 2σ is live and also replays your bracket from past shock days."}
+
+
 def load_skill(name: str) -> dict:
     skill = skills.get(name)
     return {"skill": skill.tag, "instructions": skill.body}
@@ -277,7 +315,8 @@ def propose_recommendation(**payload) -> dict:
     source = payload.pop("_source", "chat")
     run_id = payload.pop("_run_id", None)
     loaded = payload.pop("_skills", None) or []
-    bypass = bool(payload.pop("_bypass", False)) and source != "analyst"  # a /bypass chat turn
+    unattended = source in recommendations.UNATTENDED
+    bypass = bool(payload.pop("_bypass", False)) and not unattended  # a /bypass chat turn
     item = _inst(payload.get("instrument_id", ""))
     snapshot = next((row for row in scan.forecasts() if row["instrument_id"] == item.id), None)
     direction = str(payload.get("direction", "")).lower()
@@ -290,13 +329,13 @@ def propose_recommendation(**payload) -> dict:
     stop_pct = abs(float(payload["stop"]) / price - 1)
     target_pct = abs(float(payload["target"]) / price - 1)
     # The probability and expected value come from the data; the model's number is kept for comparison.
-    prob = probability.evidence_probability(item.id, direction, horizon, stop_pct, target_pct, snapshot)
+    prob = probability.evidence_probability(item.id, direction, horizon, stop_pct, target_pct, snapshot, quote)
     minimum = config.get_float("min_probability")
     account = accounts.get()
     failed_gate = prob["expected_return"] <= 0 or prob["probability"] < minimum
     # Accounts with gate "any" take what the user asks for (never the unattended analyst's calls),
     # and so does any account on a /bypass turn.
-    override = failed_gate and (bypass or (account["gate"] == "any" and source != "analyst"))
+    override = failed_gate and (bypass or (account["gate"] == "any" and not unattended))
     why = "the user placed it with /bypass" if bypass else f"{account['name']} accepts any trade"
     if failed_gate and not override:
         reason = "negative expected value" if prob["expected_return"] <= 0 else f"below the {minimum:.0%} minimum"
@@ -315,8 +354,11 @@ def propose_recommendation(**payload) -> dict:
     payload["base_probability"] = prob["base"]
     payload["stated_probability"] = float(stated) if stated is not None else None
     payload["confidence"] = _confidence(prob)
+    tier, risk_mult, tier_why = size_tier(prob, override)
+    payload["size_tier"], payload["risk_mult"] = tier, risk_mult
     payload["evidence"] = [*(payload.get("evidence") or []),
-                           {"type": "calibration", "summary": prob["explanation"]}]
+                           {"type": "calibration", "summary": prob["explanation"]},
+                           {"type": "sizing", "summary": f"{tier}: {risk_mult:.0%} of the normal risk budget ({tier_why})"}]
     if override:
         payload["confidence"] = "low"
         payload["evidence"].append({
@@ -336,6 +378,7 @@ def propose_recommendation(**payload) -> dict:
                         "components": prob["components"]},
         "skills_recorded": loaded or "none (load pre-trade-checklist before proposing)",
         "account": account["name"],
+        "size": f"{tier}: {risk_mult:.0%} of the normal risk budget ({tier_why})",
         "gate": (f"OVERRIDDEN: this trade fails the evidence gate (expected value {prob['expected_return']:+.2%}). "
                  f"It was recorded because {why}; say so plainly."
                  if override else "passed"),
@@ -385,6 +428,16 @@ TOOLS: dict[str, dict] = {
         "parameters": {"type": "object", "properties": {
             "minutes": {"type": "integer", "minimum": 5, "maximum": 10080}, "instrument": _INSTR,
             "min_level": {"type": "integer", "minimum": 1, "maximum": 3}}},
+    },
+    "shock_reaction": {
+        "fn": shock_reaction,
+        "description": "Today's move in the asset's own σ (live quote or last bars, with bad-print warnings) and what "
+                       "followed its past shocks of that size and direction 1, 3, 5 and 10 sessions later: continuation "
+                       "or reversal, edge, hit rate, t, FDR q, reliable flag. The evidence for trading breaking news.",
+        "parameters": {"type": "object", "properties": {
+            "instrument": _INSTR, "side": {"type": "string", "enum": ["up", "down"], "description": "Default: today's move"},
+            "sigma": {"type": "number", "minimum": 1.5, "maximum": 5, "description": "Shock size threshold (default 2)"}},
+            "required": ["instrument"]},
     },
     "event_study": {
         "fn": event_study_tool,
@@ -513,14 +566,17 @@ TOOLS: dict[str, dict] = {
     "propose_recommendation": {
         "fn": propose_recommendation,
         "description": ("Record a recommendation (and, if autopilot is on, open a paper position sized by the risk budget). "
-                        "Only call when the evidence supports it. The server computes the probability from data "
-                        "(base rate + reliable event effects + validated model, calibrated on past outcomes) and "
-                        "rejects calls below the minimum; your own probability is stored only for comparison. The "
+                        "The server computes the probability from data (bracket base rate, conditioned on a live "
+                        "shock; reliable event effects, shock reactions and the validated model; calibrated on past "
+                        "outcomes), rejects calls with EV <= 0 or below the minimum, and sizes the rest by evidence "
+                        "(core 100%, tactical 60%, base_rate 35% of the risk budget). Your own probability is stored "
+                        "only for comparison. The "
                         "result's paper_position line says whether a position OPENED, is PENDING or was NOT OPENED."),
         "parameters": {"type": "object", "properties": {
             "instrument_id": _INSTR,
             "direction": {"type": "string", "enum": ["long", "short"]},
-            "horizon_days": {"type": "integer", "minimum": 5, "maximum": 40, "description": "Trading sessions to hold"},
+            "horizon_days": {"type": "integer", "minimum": 2, "maximum": 40,
+                             "description": "Trading sessions to hold (2-10 for news/shock trades, 10-40 otherwise)"},
             "stop": {"type": "number", "description": "Invalidation price (below current for long, above for short)"},
             "target": {"type": "number", "description": "Take-profit price"},
             "probability": {"type": "number", "minimum": 0.3, "maximum": 0.95, "description": "Your own estimate; the server replaces it with a data-derived one"},
@@ -529,7 +585,8 @@ TOOLS: dict[str, dict] = {
             "thesis": {"type": "string", "description": "2-5 sentences: why, citing the numbers"},
             "catalysts": {"type": "array", "items": {"type": "string"}},
             "evidence": {"type": "array", "description": "Each item cites one tool result", "items": {"type": "object", "properties": {
-                "type": {"type": "string", "enum": ["event_study", "analogs", "quant_model", "correlation", "news", "macro", "technical"]},
+                "type": {"type": "string", "enum": ["event_study", "shock_reaction", "analogs", "quant_model",
+                                                    "correlation", "news", "macro", "technical"]},
                 "summary": {"type": "string", "description": "e.g. 'After rate_cut, GLD 20d +4.1% vs normal, 82% hit, t=2.1, n=11'"},
                 "n": {"type": "integer"}, "stat": {"type": "number"}}, "required": ["type", "summary"]}},
             "invalidation": {"type": "string", "description": "What would prove the thesis wrong"}},

@@ -46,7 +46,7 @@ def _proposal(instrument_id: str) -> dict:
 
 
 def _computed(p: float, ev: float, evidence: bool = False):
-    def fake(instrument_id, direction, horizon_days, stop_pct, target_pct, snapshot=None):
+    def fake(instrument_id, direction, horizon_days, stop_pct, target_pct, snapshot=None, quote=None):
         return {"probability": p, "base": 0.5, "raw": p, "expected_return": ev, "avg_win": target_pct,
                 "avg_loss": stop_pct, "horizon": 20, "has_evidence": evidence,
                 "components": [{"source": "bracket base rate (test)", "p": 0.5}],
@@ -66,6 +66,7 @@ def test_every_tool_runs_on_real_data(synthetic):
         "event_study": {"event_type": "rate_cut", "instrument": "etf:gld"}, "event_effects": {"instrument": "gld"},
         "analogs": {"instrument": "stock:msft"}, "correlations": {"instrument": "etf:spy"}, "macro_regime": {},
         "portfolio": {}, "track_record": {}, "model_validation": {}, "list_recommendations": {"status": "all"},
+        "shock_reaction": {"instrument": "stock:nvda"},
     }
     for name, args in calls.items():
         text, is_error = tools.call(name, args)
@@ -264,7 +265,7 @@ def test_skills_catalog_and_load():
     names = {s["name"] for s in skills.catalog()}
     assert {"pre-trade-checklist", "position-review", "news-triage", "post-mortem", "event-playbook"} <= names
     text, is_error = tools.call("load_skill", {"name": "pre-trade-checklist"})
-    assert not is_error and json.loads(text)["skill"] == "pre-trade-checklist@2"
+    assert not is_error and json.loads(text)["skill"] == "pre-trade-checklist@3"
     assert tools.call("load_skill", {"name": "nope"})[1]
     assert "pre-trade-checklist" in skills.prompt_section()
 
@@ -278,7 +279,7 @@ def test_skills_loaded_in_chat_are_recorded_and_tracked(synthetic, favourable, m
     monkeypatch.setattr(llm, "create", lambda kind="main": provider)
     chat.send(None, "/recommend NVDA")
     rec = db.one("SELECT id, skills FROM recommendations")
-    assert json.loads(rec["skills"]) == ["pre-trade-checklist@2"]
+    assert json.loads(rec["skills"]) == ["pre-trade-checklist@3"]
     # Close it early through the tool; holding is scored once the path resolves.
     text, is_error = tools.call("close_recommendation", {"recommendation_id": rec["id"],
                                                          "reason": "Invalidation hit: closed below the 50-day average"},
@@ -290,7 +291,7 @@ def test_skills_loaded_in_chat_are_recorded_and_tracked(synthetic, favourable, m
     db.execute("UPDATE recommendations SET expires_at='2000-01-01T00:00:00+00:00', created_at='2020-01-01T00:00:00+00:00'")
     assert recommendations.score_early_closes() == 1
     record = recommendations.track_record()
-    assert record["by_skill"]["pre-trade-checklist@2"]["n"] == 1
+    assert record["by_skill"]["pre-trade-checklist@3"]["n"] == 1
     assert record["early_closes"]["scored"] == 1 and record["early_closes"]["avg_saved"] is not None
 
 

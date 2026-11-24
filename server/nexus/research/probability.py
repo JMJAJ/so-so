@@ -5,7 +5,11 @@ profit. So its base rate is a *bracket simulation*: replay the same stop and tar
 distances from every past entry day in the asset's history and count how often the
 trade made money, plus the average win and loss.
 
-  base      bracket simulation on the asset's daily highs and lows (last 10 years).
+  base      bracket simulation on the asset's daily highs and lows (last 10 years). When the
+            asset moved >= 2σ today or yesterday, the bracket is also replayed from past shock
+            days only and blended in by n / (n + 20): the base rate of the situation you trade in.
+  shock     a reliable continuation/reversal after past shocks (research/reaction.py) counts as
+            evidence like a reliable event effect.
             Single stocks first have their excess drift over the S&P 500 removed: the
             universe is today's large caps (survivors), so their raw history overstates
             how often buying them worked.
@@ -24,7 +28,7 @@ import numpy as np
 import pandas as pd
 
 from .. import data, db, universe
-from . import event_study
+from . import event_study, reaction
 
 SHRINK = 20
 MIN_CALIBRATION_N = 20
@@ -42,7 +46,8 @@ def _ohlc(item: universe.Instrument) -> tuple[pd.DataFrame, str]:
     frame = data.ohlcv(item.id, start)
     if frame.empty or item.asset_class != "stock":
         return frame, f"{item.symbol} history"
-    spy = data.ohlcv("etf:spy", start)["close"]
+    spy_bars = data.ohlcv("etf:spy", start)
+    spy = spy_bars["close"] if not spy_bars.empty else pd.Series(dtype=float)
     if spy.empty:
         return frame, f"{item.symbol} history"
     # Remove the stock's average daily excess return over SPY (survivorship drift).
@@ -56,8 +61,9 @@ def _ohlc(item: universe.Instrument) -> tuple[pd.DataFrame, str]:
 
 
 def simulate_bracket(frame: pd.DataFrame, direction: str, horizon: int, stop_pct: float, target_pct: float,
-                     end: int | None = None) -> dict:
-    """Replay the bracket from every STEP-th day of `frame` (rows before `end` only)."""
+                     end: int | None = None, entries: list[int] | None = None, min_n: int = 30) -> dict:
+    """Replay the bracket from every STEP-th day of `frame` (rows before `end` only), or only
+    from the row positions in `entries` (a conditional base rate, e.g. past shock days)."""
     frame = frame.iloc[:end] if end is not None else frame
     o, h, l, c = (frame[k].to_numpy(dtype=float) for k in ("open", "high", "low", "close"))
     o = np.where(np.isnan(o), c, o)
@@ -65,7 +71,9 @@ def simulate_bracket(frame: pd.DataFrame, direction: str, horizon: int, stop_pct
     l = np.where(np.isnan(l), c, l)
     long = direction == "long"
     returns = []
-    for i in range(0, len(c) - horizon - 1, STEP):
+    starts = range(0, len(c) - horizon - 1, STEP) if entries is None else \
+        [i for i in entries if 0 <= i < len(c) - horizon - 1]
+    for i in starts:
         entry = c[i]
         if not entry or np.isnan(entry):
             continue
@@ -90,7 +98,7 @@ def simulate_bracket(frame: pd.DataFrame, direction: str, horizon: int, stop_pct
         raw = exit_price / entry - 1
         returns.append(raw if long else -raw)
     arr = np.array(returns)
-    if len(arr) < 30:
+    if len(arr) < min_n:
         return {"n": len(arr), "p_win": 0.5, "avg_win": target_pct, "avg_loss": stop_pct, "mean": 0.0}
     wins, losses = arr[arr > 0], arr[arr <= 0]
     return {
@@ -133,8 +141,28 @@ def calibration_factor() -> tuple[float, str]:
     return 1.0, "not enough closed calls to calibrate yet"
 
 
+def shock_bracket(frame: pd.DataFrame, shock: dict, direction: str, horizon_days: int, stop_pct: float,
+                  target_pct: float, unconditional: dict) -> dict | None:
+    """The bracket replayed only from past shocks like today's, shrunk toward the unconditional
+    bracket by n / (n + SHRINK). After a shock volatility is higher, so stops and targets are hit
+    more often: this is the base rate of the situation the trade is actually entered in."""
+    dates = reaction.shock_days(frame["close"], shock["side"])
+    entries = [int(i) for i in frame.index.get_indexer(dates) if i >= 0]
+    cond = simulate_bracket(frame, direction, int(horizon_days), stop_pct, target_pct, entries=entries,
+                            min_n=reaction.RELIABLE_N)
+    if cond["n"] < reaction.RELIABLE_N:
+        return None
+    w = cond["n"] / (cond["n"] + SHRINK)
+
+    def blend(key: str) -> float:
+        return (1 - w) * unconditional[key] + w * cond[key]
+
+    return {"n": cond["n"], "weight": w, "p_win_raw": cond["p_win"], "p_win": blend("p_win"),
+            "avg_win": blend("avg_win"), "avg_loss": blend("avg_loss")}
+
+
 def evidence_probability(instrument_id: str, direction: str, horizon_days: int, stop_pct: float,
-                         target_pct: float, snapshot: dict | None = None) -> dict:
+                         target_pct: float, snapshot: dict | None = None, quote: dict | None = None) -> dict:
     item = universe.require(instrument_id)
     horizon = nearest_horizon(horizon_days)
     frame, history_label = _ohlc(item)
@@ -143,6 +171,40 @@ def evidence_probability(instrument_id: str, direction: str, horizon_days: int, 
     base = bracket["p_win"]
     components = [{"source": f"bracket base rate ({history_label}, n={bracket['n']})", "p": base}]
     adjustments: list[float] = []
+    evidence_kinds: list[str] = []
+
+    # A live shock (today's or yesterday's move >= 2 sigma): condition the base rate on past
+    # shocks, and count the measured follow-through or reversal as evidence when it is reliable.
+    shock = reaction.current_shock(item.id, quote) if not frame.empty else None
+    shock_info = None
+    if shock and shock["is_shock"]:
+        conditional = shock_bracket(frame, shock, direction, horizon_days, stop_pct, target_pct, bracket)
+        react = reaction.reaction(item.id, shock["side"])
+        shock_info = {**shock, "reaction": react["verdict"]}
+        if conditional:
+            bracket = {**bracket, "avg_win": conditional["avg_win"], "avg_loss": conditional["avg_loss"]}
+            base = conditional["p_win"]
+            components.append({"source": f"same bracket after past {shock['side']} shocks >= {reaction.SIGMA:g}σ "
+                                         f"(n={conditional['n']}, won {conditional['p_win_raw']:.0%}, weight "
+                                         f"{conditional['weight']:.2f})", "p": round(base, 4)})
+        pointed = reaction.trade_direction(react, int(horizon_days))
+        if not pointed and (react.get("reliable_horizons") or react.get("pooled_reliable_horizons")):
+            components.append({"source": f"shock reaction not counted at {horizon_days} sessions: reliable only at "
+                                         "other horizons, or this asset's own shocks point the other way",
+                               "p": round(base, 4)})
+        if pointed:
+            pointed, row, source = pointed
+            h = row["horizon"]
+            p_up = 0.5 + (row["hit_rate"] - 0.5) * row["n"] / (row["n"] + SHRINK)
+            p_react = p_up if direction == "long" else 1 - p_up
+            if pointed != direction:
+                p_react = min(p_react, 0.5)  # a reaction against the trade can only lower the odds
+            adjustments.append(p_react - 0.5)
+            evidence_kinds.append("shock_reaction")
+            who = item.symbol if source == "asset" else f"all {item.asset_class}s"
+            components.append({"source": f"{who}: {row['pattern']} after {shock['side']} shocks, {h} sessions "
+                                         f"(n={row['n']}, t={row['t_stat']}, q={row['q_value']})",
+                               "p": round(p_react, 4)})
 
     for event in event_study.recent_events(10, item.id):
         impact = event_study.impact(event["type"], item.id)
@@ -151,12 +213,14 @@ def evidence_probability(instrument_id: str, direction: str, horizon_days: int, 
             continue
         p_event = event_component(stats["hit_rate"], stats["n"], direction, stats["edge"])
         adjustments.append(p_event - 0.5)
+        evidence_kinds.append("event_study")
         components.append({"source": f"{event['type']} ({event['date']}), n={stats['n']}, q={stats['q_value']:.3f}",
                            "p": p_event})
 
     if snapshot and snapshot.get("model_has_edge") and snapshot.get("prob_up") is not None:
         p_model = snapshot["prob_up"] if direction == "long" else 1 - snapshot["prob_up"]
         adjustments.append(p_model - 0.5)
+        evidence_kinds.append("quant_model")
         components.append({"source": f"{item.asset_class} quant model (walk-forward edge)", "p": p_model})
 
     # Strongest single adjustment: overlapping evidence is not independent, so don't add them up.
@@ -166,7 +230,9 @@ def evidence_probability(instrument_id: str, direction: str, horizon_days: int, 
     # Calibration shrinks only the evidence part; the bracket base rate is already empirical.
     p = float(np.clip(base + k * (raw - base), P_MIN, P_MAX))
     ev = p * bracket["avg_win"] - (1 - p) * bracket["avg_loss"]
-    has_evidence = bool(adjustments)
+    # Evidence pointing against the trade lowers p; only evidence for it counts as support.
+    supporting = sorted({kind for kind, adj in zip(evidence_kinds, adjustments) if adj > 0})
+    has_evidence = bool(supporting)
     return {
         "probability": round(p, 4),
         "base": round(base, 4),
@@ -176,6 +242,8 @@ def evidence_probability(instrument_id: str, direction: str, horizon_days: int, 
         "avg_loss": round(bracket["avg_loss"], 5),
         "horizon": horizon,
         "has_evidence": has_evidence,
+        "evidence_kinds": supporting,
+        "shock": shock_info,
         "components": components,
         "calibration": {"k": round(k, 3), "basis": calibration},
         "explanation": (
@@ -183,6 +251,7 @@ def evidence_probability(instrument_id: str, direction: str, horizon_days: int, 
             f"the same bracket won {base:.0%} of {bracket['n']} past entries"
             + (f"; reliable evidence would move it to {raw:.0%}, calibrated to {p:.0%} (k={k:.2f}: {calibration})"
                if has_evidence else "; no reliable evidence beyond that")
+            + (f" (entered after a {shock_info['z']:+.1f}σ move; {shock_info['reaction']})" if shock_info else "")
             + f". Expected value {ev:+.2%} per trade"
         ),
     }

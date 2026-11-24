@@ -131,8 +131,15 @@ def run_analyst_async(focus: str) -> None:
 
 
 def job_watch(progress) -> dict:
+    from .agent import trader
+
     progress("checking watched assets for abnormal moves")
-    return notify.check_moves()
+    result = notify.check_moves()
+    try:
+        result["event_trader"] = trader.check_moves()
+    except Exception as exc:  # pushes still go out when the trader fails
+        db.log("warn", "trader", f"watch: {exc}")
+    return result
 
 
 def job_news_backfill(progress) -> dict:

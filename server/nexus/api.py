@@ -569,6 +569,36 @@ def run_analyst(body: AnalystRunIn):
     return {"started": True}
 
 
+class TraderRunIn(BaseModel):
+    instrument: str
+    reason: str | None = None
+
+
+@app.get("/api/trader")
+def trader_status():
+    from .agent import trader
+
+    return trader.status()
+
+
+@app.post("/api/trader/run")
+def trader_run(body: TraderRunIn):
+    """Run the live event trader on one asset now (what a breaking alert would start)."""
+    from .agent import trader
+
+    item = universe.require(body.instrument)
+    reason = body.reason or f"Manual check of {item.symbol}: is there a news- or shock-driven trade right now?"
+
+    def target() -> None:
+        try:
+            trader.run(item.id, reason)
+        except Exception as exc:
+            db.log("error", "trader", f"{item.symbol}: {exc}")
+
+    threading.Thread(target=target, daemon=True, name="event-trader").start()
+    return {"started": True}
+
+
 @app.get("/api/runs")
 def runs(limit: int = Query(30, ge=1, le=200)):
     return db.rows("SELECT id, kind, started_at, finished_at, status, summary, error FROM runs ORDER BY started_at DESC LIMIT ?", (limit,))

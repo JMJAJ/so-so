@@ -402,6 +402,12 @@ def _raise_alerts(fresh: list[dict], fetched_at: str) -> list[dict]:
         notify.on_alerts(unique)
     except Exception as exc:  # a notification problem must never stop the wire
         db.log("warn", "notify", f"alerts: {exc}")
+    try:
+        from ..agent import trader
+
+        trader.on_alerts(unique)
+    except Exception as exc:  # nor may the event trader
+        db.log("warn", "trader", f"alerts: {exc}")
     return unique
 
 
