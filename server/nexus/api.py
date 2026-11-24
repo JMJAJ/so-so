@@ -257,7 +257,7 @@ def market_hours():
 def get_universe():
     quotes = {}
     try:
-        quotes = prices.quotes([item.id for item in universe.INSTRUMENTS])
+        quotes = prices.quotes([item.id for item in universe.INSTRUMENTS], wait=False)
     except Exception:
         pass
     return clean([{**item, "quote": quotes.get(item["id"])} for item in universe.catalog()])

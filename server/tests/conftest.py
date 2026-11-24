@@ -55,7 +55,7 @@ def nexus_db(tmp_path, monkeypatch):
     config.set_many({"scheduler_enabled": "false"})
     data.invalidate()
     monkeypatch.setattr(prices, "quote", stub_quote)
-    monkeypatch.setattr(prices, "quotes", lambda ids: {i: stub_quote(i) for i in ids if stub_quote(i)})
+    monkeypatch.setattr(prices, "quotes", lambda ids, **_: {i: stub_quote(i) for i in ids if stub_quote(i)})
     from nexus.research import scan
 
     scan._cache.update(at=0.0, rows=[])
