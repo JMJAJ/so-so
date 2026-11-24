@@ -149,8 +149,7 @@ def table() -> dict:
     Cached until a new bar arrives."""
     from .. import db
 
-    last = db.one("SELECT MAX(date) d FROM bars")
-    key = (db.DB_PATH, last["d"] if last else None, len(universe.INSTRUMENTS))
+    key = (db.DB_PATH, db.today(), len(universe.INSTRUMENTS))
     with _table_lock:
         if _table["key"] == key and _table["value"] is not None:
             return _table["value"]

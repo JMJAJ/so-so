@@ -51,11 +51,9 @@ def enabled() -> bool:
 
 def _held() -> dict[str, dict]:
     """Instrument -> open AI call that has a live paper position in some account."""
-    out = {}
-    for rec in recommendations.list_recs("open"):
-        if db.one("SELECT 1 FROM positions WHERE recommendation_id=?", (rec["id"],)):
-            out[rec["instrument_id"]] = rec
-    return out
+    rows = db.rows("""SELECT r.* FROM recommendations r WHERE r.status='open'
+                      AND EXISTS (SELECT 1 FROM positions p WHERE p.recommendation_id=r.id)""")
+    return {row["instrument_id"]: row for row in rows}
 
 
 def _rate_ok() -> bool:
@@ -189,9 +187,18 @@ def check_moves() -> dict:
     from ..ingest import prices
 
     classes = set(config.get("enabled_classes").split(","))
-    ids = [i.id for i in universe.INSTRUMENTS if i.tradable and i.asset_class in classes]
-    quotes = prices.quotes(ids, wait=False)
+    from ..notify import CORE, watched_ids
+
     held = _held()
+    # Refresh only what we care about (watched, held, called, market gauges): a background refresh
+    # of the whole universe is about a minute of downloads on the small host, and asking for it
+    # every 3 minutes kept the CPU at 100%. The rest of the universe is scanned from quotes
+    # already cached by pages; wire alerts cover news on everything else.
+    focus = sorted((watched_ids() | set(held) | set(CORE)))
+    quotes = prices.quotes(focus, wait=False)
+    others = [i.id for i in universe.INSTRUMENTS if i.tradable and i.asset_class in classes and i.id not in quotes]
+    quotes.update(prices.cached_quotes(others))
+    quotes = {k: v for k, v in quotes.items() if (universe.get(k) and universe.get(k).asset_class in classes)}
     threshold = config.get_float("event_trade_sigma")
     fresh_after = datetime.now(timezone.utc) - timedelta(hours=18)
     candidates = []
