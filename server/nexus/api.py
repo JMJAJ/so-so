@@ -314,11 +314,13 @@ def asset(instrument: str, years: float = Query(2.0, ge=0.25, le=10)):
            WHERE date>=? AND (instrument_id=? OR instrument_id IS NULL) ORDER BY date""",
         (start, item.id),
     )
-    forecast = next((row for row in scan.forecasts() if row["instrument_id"] == item.id), None)
+    # Neither the universe-wide forecast scan nor a quote download may hold the page: the forecast
+    # appears once the background scan finishes, and the live tick (`live.watch`) refreshes the quote.
+    forecast = next((row for row in scan.forecasts(wait=False) if row["instrument_id"] == item.id), None)
     return clean({
         "instrument": item.to_dict(),
         "market": markets.status(markets.BY_ID[item.market_id], days_back=0.5, days_ahead=4),
-        "quote": prices.quote(item.id),
+        "quote": prices.quotes([item.id], wait=False)[item.id],
         "bars": [{"t": ts.date().isoformat(), "o": r.open, "h": r.high, "l": r.low, "c": r.close, "v": r.volume}
                  for ts, r in bars.iterrows()] if not bars.empty else [],
         "technicals": technicals,

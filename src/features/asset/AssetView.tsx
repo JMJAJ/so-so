@@ -1,4 +1,4 @@
-import { useQuery } from "@tanstack/react-query";
+import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import { MessageSquare, Sparkles, Star } from "lucide-react";
 import { lazy, Suspense, useMemo, useState } from "react";
 
@@ -48,7 +48,15 @@ export default function AssetView() {
     queryFn: () => api.asset(id as string, years),
     enabled: Boolean(id),
     staleTime: 60_000,
-    refetchInterval: 60_000,
+    // A range change keeps the page up; a different asset still shows the loader.
+    placeholderData: (previous) =>
+      previous && previous.instrument.id === id ? keepPreviousData(previous) : undefined,
+    // Right after a restart the forecast scan runs in the background: check back soon for it
+    // (for two minutes only, since research-only indices never get one).
+    refetchInterval: (query) =>
+      query.state.data && !query.state.data.forecast && query.state.dataUpdateCount < 12
+        ? 10_000
+        : 60_000,
   });
 
   return (

@@ -13,11 +13,17 @@ _lock = threading.Lock()
 _cache: dict = {"at": 0.0, "rows": []}
 
 
-def forecasts(*, refresh: bool = False, progress=None) -> list[dict]:
+def forecasts(*, refresh: bool = False, progress=None, wait: bool = True) -> list[dict]:
     """Forecast rows for the tradable universe. Readers never wait on a recompute: they get the
     last finished rows at once (a stale cache refreshes in the background). Only a caller that
-    asks for `refresh` (jobs, the analyst), or the very first call, waits for a computation."""
+    asks for `refresh` (jobs, the analyst), or the very first call, waits for a computation.
+    With `wait=False` even the first call returns at once (empty) and computes in the background:
+    page requests that only show one row must not hold for a universe-wide scan."""
     rows = _cache["rows"]
+    if not rows and not refresh and not wait:
+        if not _lock.locked():
+            threading.Thread(target=_recompute, daemon=True, name="forecasts").start()
+        return []
     if rows and not refresh:
         if time.time() - _cache["at"] >= TTL and not _lock.locked():
             threading.Thread(target=_recompute, daemon=True, name="forecasts").start()
