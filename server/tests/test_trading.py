@@ -117,6 +117,31 @@ def test_small_accounts_get_fractional_shares(synthetic):
     assert paper.portfolio()["starting_equity"] == 2000
 
 
+def test_small_accounts_get_fractional_commodity_contracts(synthetic):
+    gold = __import__("nexus.universe", fromlist=["x"]).require("commodity:gold")
+    # A $1.2k account, gold at 3555 with a 105 stop: one 100 oz contract is ~$355k of exposure.
+    small = paper.size_for(gold, 3555.0, 3450.0, 1_174.47, 0.35)
+    assert 0 < small < 1
+    assert paper.notional(gold, small, 3555.0) <= 1_174.47 * paper.MAX_POSITION_PCT + 1e-6
+    whole = paper.size_for(gold, 3555.0, 3450.0, 50_000_000)
+    assert whole == int(whole) and whole >= 1
+
+
+def test_chat_can_trade_a_recorded_call(synthetic):
+    from nexus.agent import tools
+
+    rec = _call("stock:aapl", auto_trade=False)
+    assert not rec["traded"]
+    text, error = tools.call("trade_recommendation", {"recommendation_id": rec["id"]}, extra={"_source": "chat"})
+    assert not error and "OPENED" in text
+    assert recommendations.get(rec["id"])["traded"]
+    again, error = tools.call("trade_recommendation", {"recommendation_id": rec["id"]}, extra={"_source": "chat"})
+    assert error and "already" in again
+    other = _call("stock:msft", auto_trade=False)
+    denied, error = tools.call("trade_recommendation", {"recommendation_id": other["id"]}, extra={"_source": "analyst"})
+    assert error and "Only the user" in denied
+
+
 def _call(instrument_id: str, auto_trade: bool) -> dict:
     price = db.one("SELECT close FROM bars WHERE instrument_id=? ORDER BY date DESC LIMIT 1", (instrument_id,))["close"]
     return recommendations.create(

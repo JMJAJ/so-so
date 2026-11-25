@@ -55,7 +55,8 @@ BYPASS_EMPTY = ("I typed /bypass without a trade. Ask me which paper trade to pl
 CHAT_EXTRA = """You are talking with the user directly. Use tools before answering factual questions
 about markets; do not answer from memory. Only call propose_recommendation when the user asks you to
 recommend, invest or trade (or uses /recommend, /invest or /bypass), and close_recommendation only when the
-user asks to review or close positions (/review, /bypass). Load the matching skill first. Use show_chart when the user asks to see
+user asks to review or close positions (/review, /bypass). When the user asks to trade a call that is
+already recorded ("trade it"), call trade_recommendation with its id: don't propose it again. Load the matching skill first. Use show_chart when the user asks to see
 something or when a chart makes the answer clearer."""
 
 

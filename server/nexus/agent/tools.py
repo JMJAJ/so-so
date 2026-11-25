@@ -311,6 +311,17 @@ def close_recommendation(recommendation_id: str, reason: str, _skills: list[str]
             "note": "What holding would have returned is recorded later and shown in the track record."}
 
 
+def trade_recommendation(recommendation_id: str, _source: str = "chat", **_extra) -> dict:
+    """Open the paper position for a recorded call that has none in the account in use."""
+    if _source in recommendations.UNATTENDED:
+        raise ValueError("Only the user can ask to trade a recorded call; propose_recommendation trades new ones")
+    rec = recommendations.trade(recommendation_id)
+    position = next(iter(recommendations._positions_of(rec["id"], accounts.current())), None)
+    line = (f"OPENED: {position['side']} {position['quantity']:g} {rec['symbol']} ({position['status']})"
+            if position else f"OPENED: {rec['symbol']} {rec['direction']}")
+    return {"paper_position": line, "recommendation_id": rec["id"]}
+
+
 def propose_recommendation(**payload) -> dict:
     source = payload.pop("_source", "chat")
     run_id = payload.pop("_run_id", None)
@@ -533,6 +544,14 @@ TOOLS: dict[str, dict] = {
             "reason": {"type": "string", "description": "Which invalidation condition happened, with the data"}},
             "required": ["recommendation_id", "reason"]},
     },
+    "trade_recommendation": {
+        "fn": trade_recommendation,
+        "description": "Open the paper position for an already recorded open call that has none in this account "
+                       "(for example it was recorded without trading, or sizing failed). Use it when the user asks "
+                       "to trade a call that is already recorded, instead of proposing it again.",
+        "parameters": {"type": "object", "properties": {"recommendation_id": {"type": "string"}},
+                       "required": ["recommendation_id"]},
+    },
     "list_recommendations": {
         "fn": list_recommendations,
         "description": "List recommendations by status, with each call's invalidation condition, skills used and lesson.",
@@ -600,7 +619,7 @@ def specs(exclude: tuple[str, ...] = ()) -> list[dict]:
             for name, tool in TOOLS.items() if name not in exclude]
 
 
-WITH_CONTEXT = ("propose_recommendation", "close_recommendation")  # receive _source/_run_id/_skills
+WITH_CONTEXT = ("propose_recommendation", "close_recommendation", "trade_recommendation")  # receive _source/_run_id/_skills
 
 
 def call(name: str, arguments: dict, *, extra: dict | None = None) -> tuple[str, bool]:
