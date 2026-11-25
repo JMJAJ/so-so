@@ -32,6 +32,13 @@ export interface Quote {
   as_of: string | null;
   stale: boolean;
   market_open: boolean;
+  /** Pre-market / after-hours trade newer than `price` (US markets). Display only. */
+  extended?: {
+    price: number;
+    change_pct: number | null;
+    as_of: string;
+    session: "pre-market" | "after-hours";
+  } | null;
 }
 
 export type SignalName = "momentum" | "trend" | "reversal" | "rsi" | "analog" | "event";

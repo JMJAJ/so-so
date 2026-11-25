@@ -167,6 +167,7 @@ function AssetBody({
   const barDay = last?.t?.slice(0, 10);
   const quoteDay = data.quote?.as_of?.slice(0, 10);
   const barIsOld = Boolean(barDay && quoteDay && barDay < quoteDay);
+  const extended = data.quote?.extended ?? null;
 
   const openCall = data.recommendations.find((rec) => rec.status === "open");
   const ranges: Array<{ key: string; label: string; active: boolean; pick: () => void }> = [
@@ -224,6 +225,18 @@ function AssetBody({
             {pct(change, 2)}
           </span>
         </div>
+        {extended && (
+          <div
+            className="flex items-baseline gap-2 pb-1 text-[13px]"
+            title={`Last ${extended.session} trade ${ago(extended.as_of)}. Paper orders fill in the regular session only.`}
+          >
+            <span className="text-muted-foreground first-letter:uppercase">{extended.session}</span>
+            <span className="font-mono font-semibold">{price(extended.price)}</span>
+            <span className={cn("font-mono font-semibold", tone(extended.change_pct))}>
+              {pct(extended.change_pct != null ? extended.change_pct / 100 : null, 2)}
+            </span>
+          </div>
+        )}
         {last && (
           <div
             className="flex gap-4 pb-1 font-mono text-[13px] text-muted-foreground"
@@ -250,7 +263,7 @@ function AssetBody({
         )}
         <span className="pb-1 text-xs text-muted-foreground">
           {data.quote?.as_of
-            ? `Quote ${ago(data.quote.as_of)}${data.quote.stale ? " (stale)" : ""}`
+            ? `Quote ${ago(data.quote.as_of)}${data.quote.stale && data.quote.market_open ? " (stale)" : ""}`
             : ""}
         </span>
         {item.tradable && <MarketChip marketId={item.market} detail className="pb-1" />}

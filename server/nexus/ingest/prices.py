@@ -6,6 +6,7 @@ import threading
 import time
 from datetime import date, datetime, timedelta, timezone
 from typing import Callable
+from zoneinfo import ZoneInfo
 
 import pandas as pd
 import yfinance as yf
@@ -169,6 +170,7 @@ def _public(item: Instrument) -> dict:
         return {"instrument_id": item.id, "price": fallback["close"], "change_pct": None, "as_of": fallback["date"],
                 "stale": True, "market_open": universe.is_market_open(item)}
     age = time.time() - cached["as_of_epoch"]
+    extended = cached.get("extended")
     return {
         "instrument_id": item.id,
         "price": cached["price"],
@@ -176,51 +178,120 @@ def _public(item: Instrument) -> dict:
         "as_of": datetime.fromtimestamp(cached["as_of_epoch"], timezone.utc).isoformat(timespec="seconds"),
         "stale": age > STALE_AFTER[item.asset_class],
         "market_open": universe.is_market_open(item),
+        # Pre-market / after-hours trade newer than the regular-session price. Display only:
+        # paper fills, stops and scoring keep using `price` (regular session).
+        "extended": None if not extended else {
+            "price": extended["price"],
+            "change_pct": extended["change_pct"],
+            "as_of": datetime.fromtimestamp(extended["as_of_epoch"], timezone.utc).isoformat(timespec="seconds"),
+            "session": extended["session"],
+        },
     }
+
+
+def _has_extended_hours(item: Instrument) -> bool:
+    from .. import markets
+
+    market = markets.BY_ID.get(item.market_id)
+    return bool(market and market.extended)
 
 
 def _refresh_quotes(items: list[Instrument]) -> None:
     """Latest price from 1-minute bars; instruments with no 1-minute data today (market not
-    open yet) fall back to the last 15-minute bar of the past five days."""
+    open yet) fall back to the last 15-minute bar of the past five days. Markets with extended
+    hours (US) download two days with pre/post-market bars so the latest regular close and any
+    newer extended-hours trade come from one request."""
     fetched_at = time.time()
     for item in items:
         _attempted[item.id] = fetched_at
-    missing = _fetch_quotes(items, period="1d", interval="1m", fetched_at=fetched_at)
+    extended = [item for item in items if _has_extended_hours(item)]
+    regular = [item for item in items if not _has_extended_hours(item)]
+    missing = _fetch_quotes(regular, period="1d", interval="1m", fetched_at=fetched_at)
+    missing += _fetch_quotes(extended, period="2d", interval="1m", fetched_at=fetched_at, prepost=True)
     if missing:
         _fetch_quotes(missing, period="5d", interval="15m", fetched_at=fetched_at)
 
 
-def _fetch_quotes(items: list[Instrument], *, period: str, interval: str, fetched_at: float) -> list[Instrument]:
+def split_sessions(item: Instrument, closes: pd.Series) -> tuple[tuple[float, pd.Timestamp] | None,
+                                                                  tuple[float, pd.Timestamp, str] | None]:
+    """(last regular-session close, newer extended-hours trade with its session name) from bars
+    that include pre/post-market. Either can be None."""
+    from .. import markets
+
+    if closes.empty:
+        return None, None
+    index = [_utc(ts) for ts in closes.index]
+    spans = markets.intervals(markets.BY_ID[item.market_id], index[0].to_pydatetime() - timedelta(days=1),
+                              index[-1].to_pydatetime() + timedelta(days=1))
+    in_regular = [any(a <= ts.to_pydatetime() < b for a, b in spans) for ts in index]
+    regular_at = [i for i, flag in enumerate(in_regular) if flag]
+    regular = (float(closes.iloc[regular_at[-1]]), index[regular_at[-1]]) if regular_at else None
+    last = len(index) - 1
+    if in_regular[last] or (regular and index[last] <= regular[1]):
+        return regular, None
+    tz = _market_tz(item)
+    next_day = regular is None or index[last].astimezone(tz).date() > regular[1].astimezone(tz).date()
+    return regular, (float(closes.iloc[last]), index[last], "pre-market" if next_day else "after-hours")
+
+
+def _market_tz(item: Instrument) -> ZoneInfo:
+    from .. import markets
+
+    return ZoneInfo(markets.BY_ID[item.market_id].tz)
+
+
+def _utc(ts) -> pd.Timestamp:
+    ts = pd.Timestamp(ts)
+    return ts.tz_localize("UTC") if ts.tzinfo is None else ts.tz_convert("UTC")
+
+
+def _fetch_quotes(items: list[Instrument], *, period: str, interval: str, fetched_at: float,
+                  prepost: bool = False) -> list[Instrument]:
     missing: list[Instrument] = []
     for offset in range(0, len(items), BATCH):
         batch = items[offset:offset + BATCH]
         try:
             frame = yf.download(
                 [item.provider_symbol for item in batch], period=period, interval=interval,
-                group_by="ticker", auto_adjust=True, threads=True, progress=False, prepost=False,
+                group_by="ticker", auto_adjust=True, threads=True, progress=False, prepost=prepost,
             )
         except Exception:
             missing.extend(batch)
             continue
-        found: list[tuple[Instrument, float, date, pd.Timestamp]] = []
+        found: list[tuple[Instrument, float, date, pd.Timestamp, tuple | None]] = []
         for item in batch:
             sub = _frame_for(frame, item.provider_symbol, len(batch))
             if sub is None:
                 missing.append(item)
                 continue
             closes = sub["Close"]
-            ts = pd.Timestamp(closes.index[-1])
-            found.append((item, float(closes.iloc[-1]), ts.date(), ts))
-        references = previous_closes([(item, day) for item, _, day, _ in found])
-        for item, price, _, ts in found:
+            if prepost:
+                regular, extended = split_sessions(item, closes)
+                if regular is None:
+                    missing.append(item)
+                    continue
+                price, ts = regular
+                day = pd.Timestamp(ts).tz_convert(closes.index[-1].tzinfo or "UTC").date() \
+                    if pd.Timestamp(closes.index[-1]).tzinfo else ts.date()
+            else:
+                ts = pd.Timestamp(closes.index[-1])
+                price, day, extended = float(closes.iloc[-1]), ts.date(), None
+            found.append((item, price, day, ts, extended))
+        references = previous_closes([(item, day) for item, _, day, _, _ in found])
+        for item, price, _, ts, extended in found:
             reference = references.get(item.id)
-            if ts.tzinfo is None:
-                ts = ts.tz_localize("UTC")
+            ts = _utc(ts)
             _quotes[item.id] = {
                 "price": price,
                 "change_pct": (price / reference - 1) * 100 if reference else None,
                 "as_of_epoch": ts.timestamp(),
                 "fetched_at": fetched_at,
+                "extended": None if extended is None else {
+                    "price": extended[0],
+                    "change_pct": (extended[0] / price - 1) * 100 if price else None,
+                    "as_of_epoch": extended[1].timestamp(),
+                    "session": extended[2],
+                },
             }
     return missing
 
