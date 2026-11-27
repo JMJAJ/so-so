@@ -48,8 +48,17 @@ def valid(token: str | None, now: float | None = None) -> bool:
 
 def locked_out(client: str) -> bool:
     recent = [t for t in _failures.get(client, []) if time.time() - t < LOCKOUT_SECONDS]
-    _failures[client] = recent
+    if recent:
+        _failures[client] = recent
+    else:
+        _failures.pop(client, None)  # no empty entry left behind for every client ever seen
     return len(recent) >= MAX_FAILURES
+
+
+def sweep() -> None:
+    """Forget clients whose failed attempts have all aged out."""
+    for client in list(_failures):
+        locked_out(client)
 
 
 def check_password(password: str, client: str) -> bool:

@@ -75,6 +75,9 @@ DEFAULTS: dict[str, str] = {
     "event_trade_max_per_hour": "6",
     # Where tapping a notification opens: the site you use (Vercel URL). Or set NEXUS_PUBLIC_URL.
     "public_url": "",
+    # Daily cleanup (nexus/cleanup.py) deletes headlines older than this; 0 keeps every headline.
+    # Never below 400: the news page reads up to a year back and the backfill dedupes 400 days.
+    "news_retention_days": "730",
 }
 
 

@@ -10,10 +10,14 @@ import pandas as pd
 
 from . import db, memory
 
-_cache: dict[tuple, tuple[float, object]] = {}
+_cache: dict[tuple, tuple[float, object, float]] = {}  # key -> (stored at, value, ttl)
 _lock = threading.Lock()
 _loading: dict[tuple, threading.Lock] = {}
 TTL = 300
+# Reads skip expired entries but never removed them, so keys that include a time bucket (asset
+# simulations) piled up for the life of the process. Inserts sweep at most this often.
+SWEEP_EVERY = 60.0
+_swept = {"at": 0.0}
 # Daily bars change only when the daily job or a research import runs, and both call
 # invalidate(); the TTL is just a safety net. Rebuilding the wide frame is the most
 # memory-hungry thing the server does, so it must not happen every few minutes.
@@ -27,6 +31,8 @@ def _cached(key: tuple, loader, ttl: float = TTL):
         if hit and now - hit[0] < ttl:
             return hit[1]
         key_lock = _loading.setdefault(key, threading.Lock())
+    if now - _swept["at"] >= SWEEP_EVERY:
+        sweep()
     # One loader per key: concurrent callers (analyst + import + page loads) wait for it
     # instead of each building their own copy at the same time.
     with key_lock:
@@ -36,8 +42,21 @@ def _cached(key: tuple, loader, ttl: float = TTL):
                 return hit[1]
         value = loader()
         with _lock:
-            _cache[key] = (time.time(), value)
+            _cache[key] = (time.time(), value, ttl)
     return value
+
+
+def sweep() -> int:
+    """Drop expired entries (and the per-key loader locks nobody holds). Returns how many."""
+    now = time.time()
+    with _lock:
+        _swept["at"] = now
+        expired = [k for k, (at, _value, ttl) in _cache.items() if now - at >= ttl]
+        for key in expired:
+            del _cache[key]
+        for key in [k for k, lock in _loading.items() if k not in _cache and not lock.locked()]:
+            del _loading[key]
+    return len(expired)
 
 
 def invalidate() -> None:

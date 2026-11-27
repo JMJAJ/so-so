@@ -378,7 +378,19 @@ def intraday(item: Instrument, span: str = "1d") -> list[dict]:
         for ts, r in frame.iterrows()
     ]
     _intraday[key] = (time.time(), rows)
+    sweep_intraday()
     return rows
+
+
+INTRADAY_KEEP = 600  # seconds an unused chart stays in memory (a revisit within it is instant)
+
+
+def sweep_intraday() -> None:
+    """Forget intraday bars nobody has looked at for a while (~1000 bars per asset and span)."""
+    now = time.time()
+    for key, (at, _rows) in list(_intraday.items()):
+        if now - at > INTRADAY_KEEP:
+            _intraday.pop(key, None)
 
 
 def _download_intraday(item: Instrument, period: str, interval: str) -> pd.DataFrame | None:

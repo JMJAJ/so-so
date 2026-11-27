@@ -10,6 +10,7 @@ import json
 import os
 import sqlite3
 import threading
+import zlib
 from contextlib import contextmanager
 from datetime import datetime, timezone
 from typing import Any, Iterator
@@ -333,6 +334,8 @@ def connect() -> sqlite3.Connection:
     conn.execute("PRAGMA journal_mode=WAL")
     conn.execute("PRAGMA busy_timeout=10000")
     conn.execute("PRAGMA synchronous=NORMAL")
+    # A checkpointed WAL is truncated back to this size instead of keeping its high-water mark.
+    conn.execute("PRAGMA journal_size_limit=67108864")
     return conn
 
 
@@ -480,10 +483,13 @@ def dumps(value: Any) -> str:
     return json.dumps(value, default=str, separators=(",", ":"))
 
 
-def loads(value: str | None, default: Any = None) -> Any:
+def loads(value: str | bytes | None, default: Any = None) -> Any:
+    """JSON from a column; also reads zlib-compressed JSON (old run transcripts, see cleanup.py)."""
     if not value:
         return default
     try:
+        if isinstance(value, (bytes, bytearray, memoryview)):
+            value = zlib.decompress(bytes(value)).decode("utf-8")
         return json.loads(value)
-    except (TypeError, ValueError):
+    except (TypeError, ValueError, zlib.error):
         return default

@@ -101,6 +101,13 @@ def job_research(progress) -> dict:
     return result
 
 
+def job_cleanup(progress) -> dict:
+    from . import cleanup
+
+    progress("pruning old logs, notifications and duplicate headlines")
+    return cleanup.run()
+
+
 def job_research_import(progress) -> dict:
     progress("checking for a research bundle from GitHub Actions")
     return research_bundle.sync()
@@ -195,6 +202,7 @@ JOBS: dict[str, tuple[Callable, str]] = {
     "research_import": (job_research_import, "Import the latest research bundle computed on GitHub Actions"),
     "sim_check": (job_sim_check, "Simulation honesty check: replay the price simulator on past dates"),
     "watch": (job_watch, "Push a notification for abnormal moves on watched, held and AI-called assets"),
+    "cleanup": (job_cleanup, "Prune old logs, notifications and duplicate headlines; compact old AI transcripts"),
 }
 
 
@@ -324,6 +332,10 @@ def start_scheduler() -> None:
         scheduler.add_job(safe("research"), CronTrigger(day_of_week="sat", hour=6, timezone="UTC"), id="research")
     scheduler.add_job(safe("gdelt_backfill"), IntervalTrigger(hours=2), id="gdelt_backfill",
                       next_run_time=soon + timedelta(minutes=10))
+    # Housekeeping at a quiet hour; after a restart that missed it, once soon after boot.
+    cleanup_next = soon + timedelta(minutes=15) if _overdue("cleanup", hours=26) else None
+    scheduler.add_job(safe("cleanup"), CronTrigger(hour=4, minute=20, timezone="UTC"), id="cleanup",
+                      **({"next_run_time": cleanup_next} if cleanup_next else {}))
     scheduler.start()
     _scheduler = scheduler
     wire.start(_focus_ids_cached)
@@ -335,6 +347,17 @@ def stop_scheduler() -> None:
     if _scheduler:
         _scheduler.shutdown(wait=False)
         _scheduler = None
+
+
+def _overdue(name: str, hours: float) -> bool:
+    """Whether a job last finished more than `hours` ago (or never)."""
+    row = db.one("SELECT last_finished FROM jobs WHERE name=?", (name,))
+    if not row or not row["last_finished"]:
+        return True
+    last = datetime.fromisoformat(row["last_finished"])
+    if last.tzinfo is None:
+        last = last.replace(tzinfo=timezone.utc)
+    return datetime.now(timezone.utc) - last > timedelta(hours=hours)
 
 
 def bars_behind() -> bool:
