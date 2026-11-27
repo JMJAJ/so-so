@@ -19,6 +19,8 @@ const TOPIC_KEYS: Record<string, string[]> = {
   quotes: ["portfolio", "dashboard", "asset", "intraday", "universe", "briefs", "quotes"],
   portfolio: ["portfolio", "dashboard", "status", "track-record", "accounts", "portfolio-sim"],
   recommendations: ["dashboard", "portfolio", "track-record", "briefs", "skills", "simulate"],
+  // A forecast scan finished: the screener, home ideas and asset forecasts can fill in.
+  forecasts: ["forecasts", "dashboard", "asset"],
   news: ["news", "events", "dashboard", "status"],
   alert: ["alerts", "news"],
   settings: ["settings", "status", "notifications"],

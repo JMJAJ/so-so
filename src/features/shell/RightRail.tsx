@@ -83,6 +83,7 @@ function Watchlist() {
                 "group grid cursor-pointer grid-cols-[1fr_auto_auto] items-center gap-x-3 px-4 py-1.5 hover:bg-accent/60",
                 active && "bg-accent",
               )}
+              data-asset={row.id}
               onClick={() => openAsset(row.id)}
             >
               <div className="flex min-w-0 items-center gap-2">
@@ -221,6 +222,7 @@ export function AlertRow({ alert, wide = false }: { alert: NewsAlert; wide?: boo
             return (
               <button
                 key={id}
+                data-asset={id}
                 onClick={() => openAsset(id)}
                 className="rounded-full border border-border px-2 py-0.5 font-mono text-[10px] hover:border-strong"
                 title="Move today when the alert fired"

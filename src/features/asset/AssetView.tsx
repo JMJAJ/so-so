@@ -668,7 +668,11 @@ function CorrelationPanel({ data }: { data: AssetDetail }) {
             <ul className="space-y-1">
               {peers[side].slice(0, 6).map((peer) => (
                 <li key={peer.instrument_id} className="flex items-center justify-between text-xs">
-                  <button className="hover:text-bull" onClick={() => openAsset(peer.instrument_id)}>
+                  <button
+                    className="hover:text-bull"
+                    data-asset={peer.instrument_id}
+                    onClick={() => openAsset(peer.instrument_id)}
+                  >
                     {peer.symbol}
                   </button>
                   <span className="tabular-nums text-muted-foreground">

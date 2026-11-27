@@ -167,6 +167,7 @@ export default function IdeasView() {
                 <tr
                   key={row.instrument_id}
                   className="cursor-pointer hover:bg-accent/30"
+                  data-asset={row.instrument_id}
                   onClick={() => openAsset(row.instrument_id)}
                 >
                   <Td>

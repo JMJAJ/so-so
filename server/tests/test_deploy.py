@@ -104,11 +104,17 @@ def test_snapshot_round_trip(nexus_db, monkeypatch):
         monkeypatch.setattr(snapshot.requests, name, getattr(storage, name))
     monkeypatch.setenv("SUPABASE_URL", "https://example.supabase.co")
     monkeypatch.setenv("SUPABASE_SERVICE_KEY", "service-key")
+    monkeypatch.setitem(snapshot._state, "daily_pushed", None)
     db.log("info", "test", "remember me")
     result = snapshot.push("test")
     assert result["pushed"] and any(k.endswith("/nexus/nexus_v3.db.gz") for k in storage.objects)
-    assert any("/nexus/daily/" in k for k in storage.objects)
+    daily = [k for k in storage.objects if "/nexus/daily/" in k]
+    assert len(daily) == 1
+    first_daily = storage.objects[daily[0]]
     assert snapshot.push_if_changed("again") is None  # unchanged database: no upload
+    db.log("info", "test", "later the same day")
+    assert snapshot.push("later")["pushed"]
+    assert storage.objects[daily[0]] == first_daily  # the day's restore point is its first push
     assert not snapshot.pull()  # a local database exists: never overwritten without force
     db.execute("DELETE FROM logs")
     assert snapshot.pull(force=True)

@@ -304,6 +304,13 @@ CREATE TABLE IF NOT EXISTS notifications (
 );
 CREATE INDEX IF NOT EXISTS idx_notifications_created ON notifications(created_at DESC);
 
+-- Derived results worth keeping across restarts (e.g. the forecast scan); always recomputable.
+CREATE TABLE IF NOT EXISTS cache (
+    key TEXT PRIMARY KEY,
+    at REAL NOT NULL,
+    payload TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS schema_meta (
     version INTEGER PRIMARY KEY,
     applied_at TEXT NOT NULL

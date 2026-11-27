@@ -194,3 +194,69 @@ def test_forecast_readers_never_wait_for_a_refresh(nexus_db):
         rows = scan.forecasts()
         assert _time.perf_counter() - started < 0.1
     assert rows == [{"instrument_id": "etf:spy"}]
+
+
+def test_forecasts_survive_a_restart(nexus_db):
+    import time as _time
+
+    from nexus.research import scan
+
+    rows = [{"instrument_id": "etf:spy", "asset_class": "etf"}]
+    scan._persist(rows, _time.time())
+    scan._cache.update(at=0.0, rows=[])  # a new process: nothing in memory
+    with scan._lock:  # even while a recompute is running, the stored scan serves at once
+        started = _time.perf_counter()
+        assert scan.forecasts(wait=False) == rows
+        assert _time.perf_counter() - started < 0.1
+    scan.mark_stale()
+    scan._cache.update(at=0.0, rows=[])
+    with scan._lock:
+        assert scan.forecasts(wait=False) == rows  # stale rows still serve; a refresh runs behind
+    assert scan._cache["at"] == 0.0
+
+
+def test_dashboard_does_not_wait_for_the_first_scan(nexus_db):
+    import time as _time
+
+    from nexus import api
+    from nexus.research import scan
+
+    with scan._lock:  # the startup scan is still running
+        started = _time.perf_counter()
+        payload = api.dashboard()
+        assert _time.perf_counter() - started < 2
+    assert payload["ideas"] == []
+
+
+def test_story_index_matches_comparing_every_pair():
+    import random
+    from datetime import datetime, timedelta, timezone
+
+    from nexus.ingest import news
+
+    def brute(rows):
+        window, originals, out = timedelta(hours=news.DUPLICATE_WINDOW_H), [], {}
+        for row in rows:
+            when = datetime.fromisoformat(row["published_at"])
+            words = news._title_words(row["title"])
+            originals = [o for o in originals if when - o[0] <= window]
+            match = next((o[2] for o in originals if news.is_same_story(words, o[1])), None)
+            if match:
+                out[row["id"]] = match
+            else:
+                originals.append((when, words, row["id"]))
+        return out
+
+    random.seed(7)
+    vocab = [f"w{i}" for i in range(40)]
+    start = datetime(2026, 11, 1, tzinfo=timezone.utc)
+    rows = []
+    for i in range(600):
+        when = start + timedelta(minutes=random.randint(0, 6 * 24 * 60))
+        pool = vocab[: random.choice([6, 12, 40])]
+        title = " ".join(random.sample(pool, random.randint(1, min(9, len(pool)))))
+        rows.append({"id": str(i), "published_at": when.isoformat(), "title": title})
+    rows.sort(key=lambda r: r["published_at"])
+    expected = brute(rows)
+    assert expected  # the sample has duplicates to find
+    assert news._story_matches(rows) == expected

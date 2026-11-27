@@ -14,6 +14,7 @@ import numpy as np
 import pandas as pd
 from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel
 
@@ -44,8 +45,13 @@ async def lifespan(_app: FastAPI):
         except RuntimeError:
             pass
     else:
-        # Warm the forecast cache so the first page load doesn't pay for it.
-        threading.Thread(target=lambda: scan.forecasts(), daemon=True, name="warm-forecasts").start()
+        # Warm the forecast scan (restored from the database when one is stored) and the price
+        # history behind the regime strip and asset pages, so the first page load pays for neither.
+        def warm() -> None:
+            scan.forecasts()
+            regime_frame()
+
+        threading.Thread(target=warm, daemon=True, name="warm-forecasts").start()
     yield
     keepalive.stop()
     live.stop()
@@ -54,6 +60,8 @@ async def lifespan(_app: FastAPI):
 
 
 app = FastAPI(title="NEXUS", version="3.0.0", lifespan=lifespan)
+# JSON payloads (bars, forecasts, track record) shrink 5-10x; event streams are never compressed.
+app.add_middleware(GZipMiddleware, minimum_size=1024, compresslevel=5)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["http://localhost:3000", "http://127.0.0.1:3000"],
@@ -190,7 +198,8 @@ def dashboard():
     port = paper.portfolio()
     ideas = []
     try:
-        ideas = scan.ranked(limit=10)
+        # Never hold the home page for a universe-wide scan: ideas fill in when it finishes.
+        ideas = scan.ranked(limit=10, wait=False)
     except Exception as exc:
         db.log("warn", "dashboard", f"scan failed: {exc}")
     return clean({
@@ -274,7 +283,7 @@ def get_quotes(ids: str = Query(..., max_length=2000)):
 
 @app.get("/api/forecasts")
 def forecasts(asset_class: str | None = None):
-    rows = scan.forecasts()
+    rows = scan.forecasts(wait=False)
     if asset_class:
         rows = [row for row in rows if row["asset_class"] == asset_class]
     return clean(sorted(rows, key=lambda row: -scan.interest(row)))

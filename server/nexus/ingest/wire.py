@@ -339,8 +339,6 @@ def _store(articles: list[dict], fetched_at: str) -> list[dict]:
         elif published < (now - timedelta(days=7)).isoformat():
             continue
         article["published_at"] = published
-        text = f"{article['title']} {news._clean(article.get('summary'), 400)}"
-        article["tickers"] = tag_instruments(text)
         article["_id"] = news._news_id(article.get("url"), news._clean(article["title"], 400))
         ready.append(article)
     if not ready:
@@ -356,6 +354,9 @@ def _store(articles: list[dict], fetched_at: str) -> list[dict]:
         if article["_id"] in existing or article["_id"] in seen:
             continue
         seen.add(article["_id"])
+        # Tag only what is new: most of a feed was stored by an earlier poll, and tagging runs
+        # a few hundred name patterns per article.
+        article["tickers"] = tag_instruments(f"{article['title']} {news._clean(article.get('summary'), 400)}")
         fresh.append(article)
     if fresh:
         news.store_articles(fresh)

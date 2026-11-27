@@ -31,14 +31,33 @@ THEME_DRIVERS = {
 }
 
 
+def _corrwith(frame: pd.DataFrame, target: pd.Series) -> pd.Series:
+    """Pearson correlation of each column with `target` over the dates both have (what
+    `DataFrame.corrwith` does), in one vectorised pass instead of one Python call per column."""
+    x = frame.to_numpy(dtype=float)
+    y = target.reindex(frame.index).to_numpy(dtype=float)[:, None]
+    mask = ~np.isnan(x) & ~np.isnan(y)
+    n = mask.sum(axis=0)
+    with np.errstate(invalid="ignore", divide="ignore"):
+        xm = np.where(mask, x, 0.0)
+        ym = np.where(mask, y, 0.0)
+        mean_x, mean_y = xm.sum(axis=0) / n, ym.sum(axis=0) / n
+        dx, dy = np.where(mask, x - mean_x, 0.0), np.where(mask, y - mean_y, 0.0)
+        corr = (dx * dy).sum(axis=0) / np.sqrt((dx * dx).sum(axis=0) * (dy * dy).sum(axis=0))
+    corr[n < 2] = np.nan
+    return pd.Series(corr, index=frame.columns)
+
+
 def peers(instrument_id: str, window: int = 252, limit: int = 8) -> dict:
     closes = data.closes()
     if instrument_id not in closes:
         return {"positive": [], "negative": []}
-    rets = closes.pct_change(fill_method=None).iloc[-window:]
+    # Returns of the last `window` sessions only (one extra row for the first change), not of
+    # the whole history: same numbers, a fraction of the work.
+    rets = closes.iloc[-(window + 1):].pct_change(fill_method=None).iloc[-window:]
     tradable = [item.id for item in universe.INSTRUMENTS if item.id in rets and item.id != instrument_id]
-    corr = rets[tradable].corrwith(rets[instrument_id]).dropna()
-    recent = closes.pct_change(fill_method=None).iloc[-60:][tradable].corrwith(rets[instrument_id].iloc[-60:]).dropna()
+    corr = _corrwith(rets[tradable], rets[instrument_id]).dropna()
+    recent = _corrwith(rets.iloc[-60:][tradable], rets[instrument_id].iloc[-60:]).dropna()
 
     def pack(ids):
         return [{"instrument_id": i, "symbol": universe.get(i).symbol, "corr_1y": round(float(corr[i]), 3),

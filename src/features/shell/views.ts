@@ -135,3 +135,45 @@ export async function warmAll(client: QueryClient, current: View): Promise<void>
     if (view !== current) await warmView(client, view);
   }
 }
+
+/** The asset page's code and its default (2-year) detail, before the asset is opened. */
+export function warmAsset(client: QueryClient, id: string): void {
+  void warmView(client, "asset");
+  void client.prefetchQuery({
+    queryKey: ["asset", id, 2],
+    queryFn: () => api.asset(id, 2),
+    staleTime: 60_000,
+  });
+}
+
+const HOVER_INTENT_MS = 120;
+
+/** Prefetch any asset an element marked `data-asset` links to: after a short hover (so sweeping
+ * the pointer across a list fetches nothing), on keyboard focus, and at once on press, which
+ * starts the request a few hundred milliseconds before the click lands. Returns a cleanup. */
+export function prefetchAssetLinks(client: QueryClient): () => void {
+  let timer: number | undefined;
+  let pending: string | null = null;
+  const target = (event: Event) =>
+    (event.target as Element | null)?.closest?.("[data-asset]")?.getAttribute("data-asset") || null;
+  const later = (event: Event) => {
+    const id = target(event);
+    if (id === pending) return;
+    window.clearTimeout(timer);
+    pending = id;
+    if (id) timer = window.setTimeout(() => warmAsset(client, id), HOVER_INTENT_MS);
+  };
+  const now = (event: Event) => {
+    const id = target(event);
+    if (id) warmAsset(client, id);
+  };
+  document.addEventListener("pointerover", later, { passive: true });
+  document.addEventListener("focusin", now);
+  document.addEventListener("pointerdown", now, { passive: true });
+  return () => {
+    window.clearTimeout(timer);
+    document.removeEventListener("pointerover", later);
+    document.removeEventListener("focusin", now);
+    document.removeEventListener("pointerdown", now);
+  };
+}

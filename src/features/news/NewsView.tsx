@@ -249,6 +249,7 @@ function DetectedEvents() {
                   {event.instrument_id ? (
                     <button
                       className="hover:text-bull"
+                      data-asset={event.instrument_id}
                       onClick={() => openAsset(event.instrument_id as string)}
                     >
                       {event.instrument_id.split(":")[1].toUpperCase()}
@@ -295,6 +296,7 @@ function EventLibrary() {
                 <li key={asset.instrument_id} className="flex items-center justify-between text-xs">
                   <button
                     className="hover:text-bull"
+                    data-asset={asset.instrument_id}
                     onClick={() => openAsset(asset.instrument_id)}
                   >
                     {asset.symbol}

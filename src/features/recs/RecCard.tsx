@@ -40,6 +40,7 @@ export function RecCard({ rec, compact = false }: { rec: Recommendation; compact
     <article className="border border-border bg-background/40">
       <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 px-3 py-2.5">
         <button
+          data-asset={rec.instrument_id}
           onClick={() => openAsset(rec.instrument_id)}
           className="font-display text-base font-bold hover:text-bull"
         >
@@ -168,6 +169,7 @@ export function RecCard({ rec, compact = false }: { rec: Recommendation; compact
           </button>
           <button
             className="icon-button !p-1"
+            data-asset={rec.instrument_id}
             onClick={() => openAsset(rec.instrument_id)}
             aria-label="Open asset"
           >

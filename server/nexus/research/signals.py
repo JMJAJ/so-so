@@ -50,6 +50,15 @@ class EventSignal:
         events = data.events_frame()
         self.events = events if not events.empty else pd.DataFrame(columns=["type", "instrument_id", "date"])
         self._pool_cache: dict[tuple[str, str], tuple[np.ndarray, np.ndarray]] = {}
+        self._abn_np = self.abn.to_numpy()
+        self._abn_cols = {c: i for i, c in enumerate(self.abn.columns)}
+        # Grouping by type and locating macro event dates don't depend on the instrument:
+        # do them once here, not again for each of the ~150 instruments a scan visits.
+        self._groups: list[tuple[str, str, pd.DataFrame, np.ndarray | None]] = []
+        for event_type, group in self.events.groupby("type"):
+            scope = EVENT_TYPES.get(event_type, {}).get("scope", "macro")
+            macro_pos = None if scope == "asset" else self._positions(group["date"].drop_duplicates())
+            self._groups.append((event_type, scope, group, macro_pos))
 
     def _positions(self, dates: pd.Series) -> np.ndarray:
         return self.calendar.searchsorted(pd.DatetimeIndex(dates))
@@ -60,8 +69,9 @@ class EventSignal:
             return pd.Series(0.0, index=sample_dates)
         sample_pos = self.calendar.searchsorted(sample_dates)
         total = np.zeros(len(sample_dates))
-        for event_type, group in self.events.groupby("type"):
-            scope = EVENT_TYPES.get(event_type, {}).get("scope", "macro")
+        matrix, columns = self._abn_np, self._abn_cols
+        col = matrix[:, columns[instrument_id]]
+        for event_type, scope, group, macro_pos in self._groups:
             if scope == "asset":
                 own = group[group["instrument_id"] == instrument_id]
                 if own.empty:
@@ -70,8 +80,6 @@ class EventSignal:
                 if key not in self._pool_cache:
                     pool = group[group["instrument_id"].fillna("").str.startswith(f"{item.asset_class}:")]
                     pool_pos = self._positions(pool["date"])
-                    columns = {c: i for i, c in enumerate(self.abn.columns)}
-                    matrix = self.abn.to_numpy()
                     self._pool_cache[key] = (pool_pos, np.array([
                         matrix[p, columns[iid]] if iid in columns and p < len(matrix) else np.nan
                         for iid, p in zip(pool["instrument_id"], pool_pos)
@@ -79,9 +87,10 @@ class EventSignal:
                 pos, outcomes = self._pool_cache[key]
                 active_pos = np.sort(self._positions(own["date"]))
             else:
-                pos = self._positions(group["date"].drop_duplicates())
-                col = self.abn[instrument_id].to_numpy()
-                outcomes = np.array([col[p] if p < len(col) else np.nan for p in pos])
+                pos = macro_pos
+                outcomes = np.full(len(pos), np.nan)
+                inside = pos < len(col)
+                outcomes[inside] = col[pos[inside]]
                 active_pos = np.sort(pos)
             known = pos + self.horizon
             order = np.argsort(known)
@@ -133,7 +142,7 @@ def panel(instrument_ids: list[str], sample_dates: pd.DatetimeIndex | None = Non
             continue
         frame = z.loc[dates].copy()
         sigma_h = (feats["vol_20d"].loc[dates] * np.sqrt(horizon / 252)).replace(0, np.nan)
-        frame["analog"] = (analogs.mean_forward_series(instrument_id, dates, horizon) / sigma_h).clip(-4, 4)
+        frame["analog"] = (analogs.mean_forward_series(instrument_id, dates, horizon, features=feats) / sigma_h).clip(-4, 4)
         frame["event"] = (event_signal.series(instrument_id, dates) / sigma_h).clip(-4, 4)
         frame["vol"] = feats["vol_20d"].loc[dates]
         if include_target:

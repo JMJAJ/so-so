@@ -328,6 +328,7 @@ export function PortfolioSimulationPanel() {
                     <Td>
                       <button
                         className="inline-flex items-center gap-2 font-bold hover:text-bull"
+                        data-asset={row.instrument_id ?? undefined}
                         onClick={() => row.instrument_id && openAsset(row.instrument_id)}
                       >
                         {row.symbol} <DirectionBadge direction={row.side} />
@@ -550,6 +551,7 @@ export function ScenarioPanel() {
                       <Td>
                         <button
                           className="font-bold hover:text-bull"
+                          data-asset={row.instrument_id}
                           onClick={() => openAsset(row.instrument_id)}
                         >
                           {row.symbol}

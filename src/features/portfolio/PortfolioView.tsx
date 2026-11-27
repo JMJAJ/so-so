@@ -138,6 +138,7 @@ export default function PortfolioView() {
                   <Td>
                     <button
                       className="font-bold hover:text-bull"
+                      data-asset={position.instrument_id}
                       onClick={() => openAsset(position.instrument_id)}
                     >
                       {position.symbol}
@@ -208,6 +209,7 @@ export default function PortfolioView() {
                   <Td>
                     <button
                       className="font-bold hover:text-bull"
+                      data-asset={trade.instrument_id}
                       onClick={() => openAsset(trade.instrument_id)}
                     >
                       {trade.symbol}

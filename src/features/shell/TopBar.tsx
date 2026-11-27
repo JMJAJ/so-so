@@ -163,6 +163,7 @@ function TickerTape() {
       return (
         <button
           key={item.id + suffix}
+          data-asset={item.id}
           onClick={() => openAsset(item.id)}
           className="flex shrink-0 items-center gap-2 px-4 text-xs hover:text-foreground"
         >
@@ -217,6 +218,7 @@ function SearchDialog({
             <CommandItem
               key={item.id}
               value={`${item.symbol} ${item.name} ${item.asset_class}`}
+              data-asset={item.id}
               onSelect={() => pick(() => openAsset(item.id))}
               className="flex items-center gap-3"
             >

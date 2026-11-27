@@ -224,7 +224,9 @@ def run(name: str, progress: Callable[[str], None] | None = None) -> dict:
         db.execute("UPDATE jobs SET last_finished=?, last_status='ok', last_error=NULL, last_summary=?, duration_ms=? WHERE name=?",
                    (db.now_iso(), db.dumps(result)[:4000], int((time.time() - started) * 1000), name))
         live.publish("job", name=name, status="ok")
-        if name not in ("monitor", "wire", "watch") and not (name == "research_import" and result.get("skipped")):
+        # Frequent jobs leave the push to the periodic snapshot (every SNAPSHOT_MINUTES): a push
+        # copies, compresses and uploads the whole database.
+        if name not in ("monitor", "wire", "watch", "news") and not (name == "research_import" and result.get("skipped")):
             snapshot.push_async(f"after {name}")
         return result
     except Exception as exc:

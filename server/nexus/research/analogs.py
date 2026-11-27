@@ -20,14 +20,15 @@ REGIME_COLS = ["vix_pct_1y", "spy_ret_60d", "curve", "us10y_chg_60d", "dxy_ret_6
 FORWARD = 40
 
 
-def _state(instrument_id: str) -> tuple[pd.DataFrame, pd.Series]:
-    return data._cached(("analog_state", instrument_id), lambda: _build_state(instrument_id))
+def _state(instrument_id: str, features: pd.DataFrame | None = None) -> tuple[pd.DataFrame, pd.Series]:
+    """`features`: `asset_features` of this instrument's closes, when the caller already has them."""
+    return data._cached(("analog_state", instrument_id), lambda: _build_state(instrument_id, features))
 
 
-def _build_state(instrument_id: str) -> tuple[pd.DataFrame, pd.Series]:
+def _build_state(instrument_id: str, features: pd.DataFrame | None = None) -> tuple[pd.DataFrame, pd.Series]:
     closes = data.closes()
     close = closes[instrument_id].dropna()
-    feats = asset_features(close)[ASSET_COLS]
+    feats = (features if features is not None else asset_features(close))[ASSET_COLS]
     regime = regime_frame()
     cols = [c for c in REGIME_COLS if c in regime and regime[c].notna().sum() > 250]
     state = feats.join(regime[cols], how="left")
@@ -121,10 +122,10 @@ def _pick(order: np.ndarray, positions: np.ndarray, k: int, spacing: int) -> lis
 
 
 def mean_forward_series(instrument_id: str, sample_dates: pd.DatetimeIndex, horizon: int = 20,
-                        k: int = 20, spacing: int = 10) -> pd.Series:
+                        k: int = 20, spacing: int = 10, features: pd.DataFrame | None = None) -> pd.Series:
     """Point-in-time analog forecast (mean forward return of the k nearest past states)
     for many dates at once. Used by the walk-forward backtest and live signals."""
-    z, close = _state(instrument_id)
+    z, close = _state(instrument_id, features)
     z = z.dropna()
     if len(z) < 400:
         return pd.Series(dtype=float)

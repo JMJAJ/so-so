@@ -7,6 +7,8 @@ different titles is marked `duplicate_of` the first copy (title word overlap >= 
 from __future__ import annotations
 
 import hashlib
+import heapq
+import math
 import html
 import re
 import time
@@ -79,25 +81,59 @@ def is_same_story(a: frozenset[str], b: frozenset[str]) -> bool:
     return len(a & b) / len(a | b) >= DUPLICATE_JACCARD
 
 
+def _prefix(words: frozenset[str], rank: dict[str, int]) -> list[str]:
+    """The rarest words of a title, as many as any title it could match must share one of:
+    if Jaccard(a, b) >= t, a and b have a common word among the first n - ceil(t*n) + 1 of
+    each (words ranked rarest first). One more word than that absorbs float rounding."""
+    ordered = sorted(words, key=lambda w: (rank[w], w))
+    keep = len(ordered) - math.ceil(DUPLICATE_JACCARD * len(ordered)) + 2
+    return ordered[:max(1, keep)]
+
+
+def _story_matches(rows: list[dict]) -> dict[str, str]:
+    """For rows in time order: id -> id of the first earlier original (within the window) that
+    tells the same story. Same answer as comparing every pair, but candidates come from an index
+    of each original's rarest words (prefix filtering), since the wire calls this after every
+    poll that stores something."""
+    window = timedelta(hours=DUPLICATE_WINDOW_H)
+    titles = [_title_words(row["title"]) for row in rows]
+    counts: dict[str, int] = {}
+    for words in titles:
+        for w in words:
+            counts[w] = counts.get(w, 0) + 1
+    originals: list[tuple[frozenset[str], str]] = []
+    alive: list[bool] = []
+    expiry: list[tuple[datetime, int]] = []  # (published, index): drops originals past the window
+    by_word: dict[str, list[int]] = {}
+    matches: dict[str, str] = {}
+    for row, words in zip(rows, titles):
+        when = datetime.fromisoformat(row["published_at"].replace("Z", "+00:00"))
+        if when.tzinfo is None:
+            when = when.replace(tzinfo=timezone.utc)
+        while expiry and when - expiry[0][0] > window:
+            alive[heapq.heappop(expiry)[1]] = False
+        prefix = _prefix(words, counts) if words else []
+        candidates = sorted({i for w in prefix for i in by_word.get(w, ()) if alive[i]})
+        match = next((originals[i][1] for i in candidates if is_same_story(words, originals[i][0])), None)
+        if match:
+            matches[row["id"]] = match
+        else:
+            index = len(originals)
+            originals.append((words, row["id"]))
+            alive.append(True)
+            heapq.heappush(expiry, (when, index))
+            for w in prefix:
+                by_word.setdefault(w, []).append(index)
+    return matches
+
+
 def mark_duplicates(days: int = 3) -> int:
     """Mark later copies of a story (near-identical titles within 48h) as duplicates of the first."""
     rows = db.rows("SELECT id, published_at, title, duplicate_of FROM news WHERE published_at >= datetime('now', ?) "
                    "ORDER BY published_at", (f"-{days + 2} days",))
-    window = timedelta(hours=DUPLICATE_WINDOW_H)
-    originals: list[tuple[datetime, frozenset[str], str]] = []
-    updates = []
-    for row in rows:
-        when = datetime.fromisoformat(row["published_at"].replace("Z", "+00:00"))
-        if when.tzinfo is None:
-            when = when.replace(tzinfo=timezone.utc)
-        words = _title_words(row["title"])
-        originals = [o for o in originals if when - o[0] <= window]
-        match = next((o[2] for o in originals if is_same_story(words, o[1])), None)
-        if match:
-            if row["duplicate_of"] != match:
-                updates.append((match, row["id"]))
-        else:
-            originals.append((when, words, row["id"]))
+    matches = _story_matches(rows)
+    updates = [(match, row["id"]) for row in rows
+               if (match := matches.get(row["id"])) and row["duplicate_of"] != match]
     db.executemany("UPDATE news SET duplicate_of=? WHERE id=?", updates)
     if updates:
         live.publish("news")

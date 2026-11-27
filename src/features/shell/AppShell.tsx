@@ -14,7 +14,7 @@ import { RightRail } from "./RightRail";
 import { Sidebar } from "./Sidebar";
 import { TopBar } from "./TopBar";
 import { Loading } from "./ui";
-import { VIEWS, warmAll } from "./views";
+import { prefetchAssetLinks, VIEWS, warmAll } from "./views";
 
 function usePersistentFlag(key: string, initial: boolean) {
   const [value, setValue] = useState<boolean>(() => {
@@ -62,6 +62,9 @@ export default function AppShell() {
     // Only on first load: later switches warm on hover.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [client]);
+
+  // Asset links anywhere in the app start loading the asset page on hover or press.
+  useEffect(() => prefetchAssetLinks(client), [client]);
 
   const Current = VIEWS[view].component;
   const drawerOpen = chat.open && view !== "chat";

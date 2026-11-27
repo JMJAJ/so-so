@@ -330,6 +330,7 @@ function IdeasPanel({ ideas }: { ideas: Forecast[] }) {
               <tr
                 key={idea.instrument_id}
                 className="cursor-pointer hover:bg-accent/30"
+                data-asset={idea.instrument_id}
                 onClick={() => openAsset(idea.instrument_id)}
               >
                 <Td>
@@ -420,6 +421,7 @@ function EventsPanel({ events }: { events: MarketEvent[] }) {
                   {event.most_affected.slice(0, 5).map((asset) => (
                     <button
                       key={asset.instrument_id}
+                      data-asset={asset.instrument_id}
                       onClick={() => openAsset(asset.instrument_id)}
                       className="rounded-lg border border-border px-1.5 py-0.5 text-xs hover:border-strong"
                       title={`edge ${pct(asset.edge)} · t=${asset.t_stat.toFixed(1)} · n=${asset.n}`}
@@ -484,6 +486,7 @@ export function HeadlinesPanel({
                     <button
                       key={id}
                       className="rounded-lg border border-border px-1 hover:border-strong"
+                      data-asset={id}
                       onClick={() => openAsset(id)}
                     >
                       {id.split(":")[1]?.toUpperCase()}

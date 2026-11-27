@@ -8,6 +8,7 @@ from datetime import date, datetime, timedelta, timezone
 from typing import Callable
 from zoneinfo import ZoneInfo
 
+import numpy as np
 import pandas as pd
 import yfinance as yf
 
@@ -220,12 +221,17 @@ def split_sessions(item: Instrument, closes: pd.Series) -> tuple[tuple[float, pd
 
     if closes.empty:
         return None, None
-    index = [_utc(ts) for ts in closes.index]
+    # Vectorised: a quote refresh runs this over ~2 days of 1-minute bars for every US instrument.
+    index = pd.DatetimeIndex(closes.index)
+    index = (index.tz_localize("UTC") if index.tz is None else index.tz_convert("UTC")).as_unit("ns")
     spans = markets.intervals(markets.BY_ID[item.market_id], index[0].to_pydatetime() - timedelta(days=1),
                               index[-1].to_pydatetime() + timedelta(days=1))
-    in_regular = [any(a <= ts.to_pydatetime() < b for a, b in spans) for ts in index]
-    regular_at = [i for i, flag in enumerate(in_regular) if flag]
-    regular = (float(closes.iloc[regular_at[-1]]), index[regular_at[-1]]) if regular_at else None
+    stamps = index.asi8
+    in_regular = np.zeros(len(index), dtype=bool)
+    for a, b in spans:
+        in_regular |= (stamps >= pd.Timestamp(a).as_unit("ns").value) & (stamps < pd.Timestamp(b).as_unit("ns").value)
+    regular_at = np.flatnonzero(in_regular)
+    regular = (float(closes.iloc[regular_at[-1]]), index[regular_at[-1]]) if len(regular_at) else None
     last = len(index) - 1
     if in_regular[last] or (regular and index[last] <= regular[1]):
         return regular, None

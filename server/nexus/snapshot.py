@@ -5,7 +5,8 @@ Storage as a gzipped snapshot:
   - on startup, if there is no local database yet, the latest snapshot is downloaded;
   - every SNAPSHOT_MINUTES, if the database changed, and after every job;
   - on shutdown (Render sends SIGTERM before restarts and deploys).
-One dated copy per day is also kept (the last KEEP_DAILY days) to roll back from.
+One dated copy per day is also kept (the last KEEP_DAILY days) to roll back from: the first
+push of each day, so a later bad state never overwrites that day's restore point.
 
 Supabase pauses free projects after a week without database activity, and it's not documented
 whether Storage traffic counts. So on startup and then at most every HEARTBEAT_HOURS the server
@@ -121,9 +122,13 @@ def push(reason: str = "manual") -> dict:
                 target.close()
                 source.close()
             packed = os.path.join(tmp, LATEST)
-            with open(copy, "rb") as src, gzip.open(packed, "wb", compresslevel=6) as dst:
+            # Level 1: half the CPU of level 6 for a ~5% larger file; on a shared fraction of a
+            # core the CPU is what every page request competes with.
+            with open(copy, "rb") as src, gzip.open(packed, "wb", compresslevel=1) as dst:
                 shutil.copyfileobj(src, dst)
-            names = [LATEST, f"{DAILY_PREFIX}{date.today().isoformat()}.db.gz"]
+            today = date.today().isoformat()
+            daily = _state.get("daily_pushed") != today
+            names = [LATEST] + ([f"{DAILY_PREFIX}{today}.db.gz"] if daily else [])
             try:
                 for name in names:
                     with open(packed, "rb") as body:
@@ -137,8 +142,11 @@ def push(reason: str = "manual") -> dict:
                 db.log("warn", "snapshot", f"push failed ({reason}): {exc}")
                 return {"pushed": False, "error": str(exc)}
         _state.update(last_push=db.now_iso(), last_error=None, last_change=changed_at)
+        if daily:
+            _state["daily_pushed"] = today
     heartbeat()
-    _prune_daily(key)
+    if daily:
+        _prune_daily(key)
     return {"pushed": True, "bytes": size, "reason": reason}
 
 
